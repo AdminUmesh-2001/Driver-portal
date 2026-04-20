@@ -6,7 +6,11 @@ import './App.css';
 
 const STORAGE_KEY = 'astar-move-tracking-state-v4';
 const MAX_SCREENSHOTS = 30;
-const EMAIL_BACKEND_URL = `${window.location.protocol}//${window.location.hostname}:4000`;
+const EMAIL_BACKEND_URL =
+  process.env.REACT_APP_BACKEND_URL ||
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? `${window.location.protocol}//${window.location.hostname}:4000`
+    : 'https://nexora-driver-backend.onrender.com');
 const LOGIN_FACE_PARAM = new URLSearchParams(window.location.search).get('face');
 const DEFAULT_LOGIN_FACE = window.location.port === '3001' ? 'admin' : 'driver';
 const DEFAULT_ADMIN_ACCOUNT = {
