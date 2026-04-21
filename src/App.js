@@ -1299,13 +1299,19 @@ function App() {
     setRecycleBin((prev) => prev.filter((item) => !item?.deletedAtSort || now - item.deletedAtSort <= maxAdminAge));
   }, []);
 
-  useEffect(() => {
-    if (currentUserId && !accounts.some((account) => account.id === currentUserId)) {
-      setCurrentUserId('');
-      setPortalFace('driver');
-      setSelectedDriver('');
-    }
-  }, [accounts, currentUserId]);
+ useEffect(() => {
+  if (
+    sharedStateReadyRef.current &&
+    currentUserId &&
+    accounts.length > 1 &&
+    !accounts.some((account) => account.id === currentUserId)
+  ) {
+    setCurrentUserId('');
+    setPortalFace('driver');
+    setSelectedDriver('');
+  }
+}, [accounts, currentUserId]);
+
 
   useEffect(() => {
     if (currentUser?.role === 'driver' && currentUser.appBlocked) {
