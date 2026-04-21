@@ -967,46 +967,30 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        accounts,
-        currentUserId,
-        moves,
-        waitRecords,
-        portalFace,
-        selectedDriver,
-        savedFiles,
-        waitSavedFiles,
-        companyFiles,
-        messages,
-        recycleBin,
-        purgedRecycleIds,
-        restoredRecycleIds,
-        clearedMoveIds,
-        deletedSourceIdsState,
-        adminNotificationEmail,
-      })
-    );
+    useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          accounts,
+          currentUserId,
+          portalFace,
+          selectedDriver,
+          adminNotificationEmail,
+        })
+      );
+    } catch {
+      // Mobile/private browsers can reject storage when large screenshot data exists.
+      // The backend remains the source of truth, so the app should keep running.
+    }
   }, [
     accounts,
     adminNotificationEmail,
-    clearedMoveIds,
-    companyFiles,
     currentUserId,
-    deletedSourceIdsState,
-    moves,
-    messages,
     portalFace,
-    purgedRecycleIds,
-    restoredRecycleIds,
-    recycleBin,
-    savedFiles,
     selectedDriver,
-    waitRecords,
-    waitSavedFiles,
   ]);
+
 
   useEffect(() => {
     accountsRef.current = accounts;
