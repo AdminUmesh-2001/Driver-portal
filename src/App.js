@@ -1110,7 +1110,7 @@ function App() {
       const nextClearedMoveIds = remoteState.clearedMoveIds || [];
       const nextDeletedSourceIdsState = remoteState.deletedSourceIdsState || [];
       isApplyingRemoteStateRef.current = true;
-      setAccounts(remoteState.accounts || [DEFAULT_ADMIN_ACCOUNT]);
+      const nextAccounts = mergeAccounts(accountsRef.current, remoteState.accounts || []); setAccounts(nextAccounts);
       setMoves(
         (remoteState.moves || []).filter(
           (move) => (move.screenshots?.length || 0) > 0 && !nextClearedMoveIds.includes(move.id)
@@ -1135,7 +1135,7 @@ function App() {
       setDeletedSourceIdsState(nextDeletedSourceIdsState);
       setAdminNotificationEmail(remoteState.adminNotificationEmail || DEFAULT_ADMIN_ACCOUNT.email);
       sharedStateRef.current = {
-        accounts: remoteState.accounts || [DEFAULT_ADMIN_ACCOUNT],
+        accounts: nextAccounts,
         moves: (remoteState.moves || []).filter(
           (move) => (move.screenshots?.length || 0) > 0 && !nextClearedMoveIds.includes(move.id)
         ),
