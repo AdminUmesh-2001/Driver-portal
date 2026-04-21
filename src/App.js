@@ -1349,11 +1349,6 @@ function App() {
   };
 
   const handleLogin = async () => {
-    if (!backendReady) {
-      setAuthError('Shared login service is offline. Keep node server.js running on the computer.');
-      return;
-    }
-
     let latestAccounts = accounts;
 
     try {
@@ -1363,7 +1358,7 @@ function App() {
         setAccounts(remoteState.accounts);
       }
     } catch {
-      setAuthError('Shared login service is offline. Keep node server.js running on the computer.');
+      setAuthError('Online login service is waking up or unavailable. Wait one minute, then try again.');
       return;
     }
 
@@ -3196,11 +3191,11 @@ function App() {
               />
             </label>
             {!!authError && <p className="notice danger-text">{authError}</p>}
-            <p className={backendReady ? 'notice success-text' : 'notice danger-text'}>
-              {backendReady
-                ? 'Shared login service connected.'
-                : 'Shared login service offline. Start node server.js on the computer.'}
-            </p>
+           <p className={backendReady ? 'notice success-text' : 'notice danger-text'}>
+  {backendReady
+    ? 'Shared login service connected.'
+    : 'Online login service is connecting. If this is the first login, wait one minute and try again.'}
+</p>
             {requestedLoginFace === 'admin' ? (
               <div className="notice">
                 Admin login:
