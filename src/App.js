@@ -3846,7 +3846,16 @@ function App() {
                         setMobileMenuOpen(false);
                       }}
                     >
-                      Fuel & Expenses
+                      Fuel
+                    </button>
+                    <button
+                      className={activeTab === 'expenses' ? 'tab active' : 'tab'}
+                      onClick={() => {
+                        setActiveTab('expenses');
+                        setMobileMenuOpen(false);
+                      }}
+                    >
+                      Expenses
                     </button>
                   </div>
                 )}
@@ -3968,7 +3977,16 @@ function App() {
                     setMobileMenuOpen(false);
                   }}
                 >
-                  Fuel & Expenses
+                  Fuel
+                </button>
+                <button
+                  className={activeTab === 'expenses' ? 'tab active' : 'tab'}
+                  onClick={() => {
+                    setActiveTab('expenses');
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  Expenses
                 </button>
                   <button
                     className={activeTab === 'messages' ? 'tab active' : 'tab'}
@@ -4960,10 +4978,10 @@ function App() {
           <section className="panel">
             <div className="panel-header split">
               <div>
-                <h2>Fuel & Expenses</h2>
+                <h2>Fuel</h2>
                 <p>
-                  Track live weather, daily miles, fuel receipts, truck expenses, and two-week
-                  paycheck comparisons for {selectedDriver}.
+                  Track live weather, daily miles, fuel receipts, and two-week paycheck
+                  comparisons for {selectedDriver}.
                 </p>
               </div>
               <div className="capture-summary">
@@ -5067,79 +5085,6 @@ function App() {
                   </table>
                 </div>
               </section>
-
-              <section className="match-card">
-                <div className="match-card-head">
-                  <h3>Truck Expenses</h3>
-                  <span className="empty-pill">Year total ${yearlyExpenseTotal.toFixed(2)}</span>
-                </div>
-                <div className="form-grid compact-form">
-                  <label>
-                    Date
-                    <input
-                      type="date"
-                      value={expenseForm.entryDate}
-                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))}
-                    />
-                  </label>
-                  <label>
-                    Category
-                    <input
-                      value={expenseForm.category}
-                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}
-                    />
-                  </label>
-                  <label>
-                    Vendor
-                    <input
-                      value={expenseForm.vendor}
-                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, vendor: event.target.value }))}
-                    />
-                  </label>
-                  <label>
-                    Total
-                    <input
-                      value={expenseForm.total}
-                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, total: event.target.value }))}
-                    />
-                  </label>
-                  <label>
-                    Receipt Upload
-                    <input type="file" accept="image/*" onChange={handleExpenseReceiptUpload} />
-                  </label>
-                </div>
-                <div className="action-bar">
-                  <button className="primary-btn" onClick={saveExpenseRecord}>
-                    Save Expense
-                  </button>
-                  <span className="notice">{expenseNotice}</span>
-                </div>
-                <div className="table-wrap mini-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Category</th>
-                        <th>Vendor</th>
-                        <th>Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedExpenseRecords.map((record) => (
-                        <tr key={record.id}>
-                          <td>{record.entryDate}</td>
-                          <td>{record.category}</td>
-                          <td>{record.vendor}</td>
-                          <td>{record.total}</td>
-                        </tr>
-                      ))}
-                      {!selectedExpenseRecords.length && (
-                        <tr><td colSpan="4"><div className="empty-state small-empty">No expenses yet.</div></td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
             </div>
 
             <section className="match-card full-width-card">
@@ -5207,6 +5152,98 @@ function App() {
                 {dailyMiles.slice(-14).map((day) => (
                   <span key={day.date}>{day.date}: <strong>{day.miles.toFixed(1)} miles</strong></span>
                 ))}
+              </div>
+            </section>
+          </section>
+        )}
+
+        {activeTab === 'expenses' && (
+          <section className="panel">
+            <div className="panel-header split">
+              <div>
+                <h2>Expenses</h2>
+                <p>
+                  Add truck receipts, save manual expense entries, and review yearly totals for
+                  {selectedDriver}.
+                </p>
+              </div>
+              <div className="capture-summary">
+                <span>Year total</span>
+                <strong>${yearlyExpenseTotal.toFixed(2)}</strong>
+                <span>{selectedExpenseRecords.length} entries</span>
+              </div>
+            </div>
+
+            <section className="match-card">
+              <div className="match-card-head">
+                <h3>Truck Expenses</h3>
+                <span className="empty-pill">{selectedExpenseRecords.length} saved</span>
+              </div>
+              <div className="form-grid compact-form">
+                <label>
+                  Date
+                  <input
+                    type="date"
+                    value={expenseForm.entryDate}
+                    onChange={(event) => setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Category
+                  <input
+                    value={expenseForm.category}
+                    onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Vendor
+                  <input
+                    value={expenseForm.vendor}
+                    onChange={(event) => setExpenseForm((prev) => ({ ...prev, vendor: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Total
+                  <input
+                    value={expenseForm.total}
+                    onChange={(event) => setExpenseForm((prev) => ({ ...prev, total: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Receipt Upload
+                  <input type="file" accept="image/*" onChange={handleExpenseReceiptUpload} />
+                </label>
+              </div>
+              <div className="action-bar">
+                <button className="primary-btn" onClick={saveExpenseRecord}>
+                  Save Expense
+                </button>
+                <span className="notice">{expenseNotice}</span>
+              </div>
+              <div className="table-wrap mini-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Category</th>
+                      <th>Vendor</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedExpenseRecords.map((record) => (
+                      <tr key={record.id}>
+                        <td>{record.entryDate}</td>
+                        <td>{record.category}</td>
+                        <td>{record.vendor}</td>
+                        <td>{record.total}</td>
+                      </tr>
+                    ))}
+                    {!selectedExpenseRecords.length && (
+                      <tr><td colSpan="4"><div className="empty-state small-empty">No expenses yet.</div></td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </section>
           </section>
