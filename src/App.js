@@ -34,9 +34,46 @@ function getTimestampParts() {
 }
 
 function createEmptyForm(defaultDriver = '') {
+  const timestamp = getTimestampParts();
   return {
     driverName: defaultDriver,
+    entryDate: timestamp.dateOnly,
     screenshots: [],
+  };
+}
+
+function createEmptyFuelForm(defaultDriver = '') {
+  return {
+    driverName: defaultDriver,
+    entryDate: getTimestampParts().dateOnly,
+    km: '',
+    fuelQuantity: '',
+    fuelCost: '',
+    station: '',
+    notes: '',
+    receipt: null,
+  };
+}
+
+function createEmptyExpenseForm(defaultDriver = '') {
+  return {
+    driverName: defaultDriver,
+    entryDate: getTimestampParts().dateOnly,
+    category: 'Truck Receipt',
+    vendor: '',
+    total: '',
+    notes: '',
+    receipt: null,
+  };
+}
+
+function createEmptyPaycheckForm(defaultDriver = '') {
+  return {
+    driverName: defaultDriver,
+    startDate: getTimestampParts().dateOnly,
+    endDate: getTimestampParts().dateOnly,
+    paycheckAmount: '',
+    notes: '',
   };
 }
 
@@ -117,20 +154,6 @@ async function fetchBackendHealth() {
 
   if (!response.ok || !result.ok) {
     throw new Error(result.message || 'Could not connect to the shared backend.');
-  }
-
-  return result;
-}
-
-async function fetchNetworkInfo() {
-  const response = await fetch(`${EMAIL_BACKEND_URL}/api/network-info`);
-  const result = await response.json().catch(() => ({
-    ok: false,
-    message: 'The network info endpoint returned an invalid response.',
-  }));
-
-  if (!response.ok || !result.ok) {
-    throw new Error(result.message || 'Could not load network info.');
   }
 
   return result;
@@ -224,9 +247,10 @@ function mergeStringLists(localItems = [], remoteItems = []) {
 
 function createDeletedItem(type, item) {
   const timestamp = getTimestampParts();
+  const sourceId = item.id || item.previewUrl || '';
   return {
-    id: `trash-${type}-${item.id || item.previewUrl || Date.now()}`,
-    sourceId: item.id || item.previewUrl || '',
+    id: `trash-${type}-${sourceId || timestamp.sortValue}-${timestamp.sortValue}`,
+    sourceId,
     type,
     name: item.name || item.moveNumber || item.fileName || 'Deleted item',
     driverName: item.driverName || '',
@@ -451,6 +475,11 @@ function formatMilitaryDateTime(dateTime, fallbackText = '-') {
   return normalizeDateTimeText(fallbackText) || '-';
 }
 
+function dateInputToSort(value) {
+  const parsed = new Date(`${value || getTimestampParts().dateOnly}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? Date.now() : parsed.getTime();
+}
+
 function sortByXatDateTime(items = [], accessor = (item) => item) {
   return [...items].sort((left, right) => {
     const leftValue = accessor(left);
@@ -581,6 +610,58 @@ function deriveFieldsFromText(rawText, fileName = '') {
   };
 }
 
+function deriveFuelFieldsFromText(rawText, fileName = '') {
+  const mergedText = `${rawText || ''}\n${fileName.replace(/\.[^.]+$/, '')}`;
+  const upperText = toUpperWords(mergedText);
+  const lines = upperText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const compactText = lines.join(' ');
+  const dateMatch = compactText.match(/\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/);
+  const kmMatch =
+    parseLabeledValue(compactText, ['ODOMETER', 'KM', 'KMS', 'MILEAGE'])?.match(/\d{3,7}/)?.[0] ||
+    compactText.match(/\b\d{3,7}\s*(?:KM|KMS)\b/)?.[0]?.match(/\d{3,7}/)?.[0] ||
+    '';
+  const quantityMatch =
+    parseLabeledValue(compactText, ['LITRES?', 'LITERS?', 'L', 'QTY', 'QUANTITY'])?.match(/\d{1,4}(?:\.\d{1,3})?/)?.[0] ||
+    compactText.match(/\b\d{1,4}(?:\.\d{1,3})?\s*(?:L|LITRE|LITER|GAL|GALLON)\b/)?.[0]?.match(/\d{1,4}(?:\.\d{1,3})?/)?.[0] ||
+    '';
+  const totalMatch =
+    parseLabeledValue(compactText, ['TOTAL', 'AMOUNT', 'SALE'])?.match(/\d{1,5}(?:\.\d{2})/)?.[0] ||
+    compactText.match(/\$\s*(\d{1,5}(?:\.\d{2}))/)?.[1] ||
+    '';
+
+  return {
+    entryDate: dateMatch ? parseDateTimeValue(dateMatch[1])?.toISOString().slice(0, 10) || '' : '',
+    km: kmMatch,
+    fuelQuantity: quantityMatch,
+    fuelCost: totalMatch,
+    station: lines.find((line) => /(PETRO|ESSO|SHELL|HUSKY|PILOT|FLYING|CARDLOCK|FUEL)/.test(line)) || '',
+  };
+}
+
+function deriveExpenseFieldsFromText(rawText, fileName = '') {
+  const mergedText = `${rawText || ''}\n${fileName.replace(/\.[^.]+$/, '')}`;
+  const upperText = toUpperWords(mergedText);
+  const lines = upperText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const compactText = lines.join(' ');
+  const total =
+    parseLabeledValue(compactText, ['TOTAL', 'AMOUNT', 'BALANCE'])?.match(/\d{1,5}(?:\.\d{2})/)?.[0] ||
+    compactText.match(/\$\s*(\d{1,5}(?:\.\d{2}))/)?.[1] ||
+    '';
+  const dateMatch = compactText.match(/\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/);
+
+  return {
+    entryDate: dateMatch ? parseDateTimeValue(dateMatch[1])?.toISOString().slice(0, 10) || '' : '',
+    vendor: lines[0] || '',
+    total,
+  };
+}
+
 function deriveWaitFieldsFromText(rawText, fileName = '') {
   const baseFields = deriveFieldsFromText(rawText, fileName);
   const mergedText = `${rawText || ''}\n${fileName.replace(/\.[^.]+$/, '')}`;
@@ -620,6 +701,117 @@ function normalizeMoveNumber(value) {
     .toUpperCase()
     .replace(/\s+/g, '')
     .replace(/[^A-Z0-9-]/g, '');
+}
+
+function pickCleanMoveNumber(...values) {
+  const combined = values
+    .map((value) => String(value || '').toUpperCase())
+    .join(' ');
+  const matches = combined.match(/\b\d{6,}(?:-\d+)?\b/g);
+  return matches?.[0] || '';
+}
+
+function normalizeSharedStateShape(state = {}) {
+  const purgedRecycleIds = state.purgedRecycleIds || [];
+  const restoredRecycleIds = state.restoredRecycleIds || [];
+  const clearedMoveIds = state.clearedMoveIds || [];
+  const deletedSourceIdsState = state.deletedSourceIdsState || [];
+  const deletedSourceIds = new Set(deletedSourceIdsState);
+  const activeRecycleBin = (state.recycleBin || []).filter(
+    (item) =>
+      item?.id &&
+      !purgedRecycleIds.includes(item.id) &&
+      !restoredRecycleIds.includes(item.id)
+  );
+
+  activeRecycleBin.forEach((item) => {
+    if (item.sourceId) {
+      deletedSourceIds.add(item.sourceId);
+    }
+  });
+
+  return {
+    ...state,
+    moves: sortByXatDateTime(
+      dedupeMoveRecords(
+        (state.moves || []).filter(
+          (move) => (move.screenshots?.length || 0) > 0 && !clearedMoveIds.includes(move.id)
+        )
+      )
+    ),
+    waitRecords: sortByXatDateTime(
+      (state.waitRecords || []).filter((record) => (record.screenshots?.length || 0) > 0)
+    ),
+    savedFiles: sortFilesNewestFirst(
+      (state.savedFiles || []).filter((file) => !deletedSourceIds.has(file.id))
+    ),
+    waitSavedFiles: sortFilesNewestFirst(
+      (state.waitSavedFiles || []).filter((file) => !deletedSourceIds.has(file.id))
+    ),
+    companyFiles: sortFilesNewestFirst(
+      (state.companyFiles || []).filter((file) => !deletedSourceIds.has(file.id))
+    ),
+    fuelRecords: sortByXatDateTime(state.fuelRecords || [], (record) => ({
+      xatDateTimeSort: record.entryDateSort || record.recordedAtSort || 0,
+      name: record.station || record.driverName || '',
+    })),
+    expenseRecords: sortByXatDateTime(state.expenseRecords || [], (record) => ({
+      xatDateTimeSort: record.entryDateSort || record.recordedAtSort || 0,
+      name: record.vendor || record.category || '',
+    })),
+    paycheckRecords: sortByXatDateTime(state.paycheckRecords || [], (record) => ({
+      xatDateTimeSort: record.endDateSort || record.recordedAtSort || 0,
+      name: record.driverName || '',
+    })),
+    recycleBin: activeRecycleBin,
+    purgedRecycleIds,
+    restoredRecycleIds,
+    clearedMoveIds,
+    deletedSourceIdsState: Array.from(deletedSourceIds),
+  };
+}
+
+function mergeSharedStates(localState = {}, remoteState = {}) {
+  const accounts = mergeAccounts(localState.accounts, remoteState.accounts || []);
+  const purgedRecycleIds = mergeStringLists(
+    localState.purgedRecycleIds,
+    remoteState.purgedRecycleIds || []
+  );
+  const restoredRecycleIds = mergeStringLists(
+    localState.restoredRecycleIds,
+    remoteState.restoredRecycleIds || []
+  );
+  const clearedMoveIds = mergeStringLists(
+    localState.clearedMoveIds,
+    remoteState.clearedMoveIds || []
+  );
+  const deletedSourceIdsState = mergeStringLists(
+    localState.deletedSourceIdsState,
+    remoteState.deletedSourceIdsState || []
+  );
+
+  return normalizeSharedStateShape({
+    ...remoteState,
+    accounts,
+    moves: mergeRecordsById(localState.moves, remoteState.moves || []),
+    waitRecords: mergeRecordsById(localState.waitRecords, remoteState.waitRecords || []),
+    savedFiles: mergeRecordsById(localState.savedFiles, remoteState.savedFiles || []),
+    waitSavedFiles: mergeRecordsById(localState.waitSavedFiles, remoteState.waitSavedFiles || []),
+    companyFiles: mergeRecordsById(localState.companyFiles, remoteState.companyFiles || []),
+    fuelRecords: mergeRecordsById(localState.fuelRecords, remoteState.fuelRecords || []),
+    expenseRecords: mergeRecordsById(localState.expenseRecords, remoteState.expenseRecords || []),
+    paycheckRecords: mergeRecordsById(localState.paycheckRecords, remoteState.paycheckRecords || []),
+    messages: mergeRecordsById(localState.messages, remoteState.messages || []),
+    recycleBin: mergeRecycleItems(localState.recycleBin, remoteState.recycleBin || []),
+    purgedRecycleIds,
+    restoredRecycleIds,
+    clearedMoveIds,
+    deletedSourceIdsState,
+    adminNotificationEmail:
+      localState.adminNotificationEmail ||
+      remoteState.adminNotificationEmail ||
+      DEFAULT_ADMIN_ACCOUNT.email,
+  });
 }
 
 function cloneMoveRows(rows) {
@@ -901,9 +1093,8 @@ function App() {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   const [backendReady, setBackendReady] = useState(false);
-  const [driverPhoneLink, setDriverPhoneLink] = useState('');
-  const [networkStatus, setNetworkStatus] = useState('');
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [authDialogMode, setAuthDialogMode] = useState('forgot');
   const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
@@ -921,6 +1112,16 @@ function App() {
   const [renameWaitFileId, setRenameWaitFileId] = useState('');
   const [renameWaitDraft, setRenameWaitDraft] = useState('');
   const [companyFiles, setCompanyFiles] = useState(savedState?.companyFiles || []);
+  const [fuelRecords, setFuelRecords] = useState(savedState?.fuelRecords || []);
+  const [expenseRecords, setExpenseRecords] = useState(savedState?.expenseRecords || []);
+  const [paycheckRecords, setPaycheckRecords] = useState(savedState?.paycheckRecords || []);
+  const [fuelForm, setFuelForm] = useState(createEmptyFuelForm(initialSelectedDriver));
+  const [expenseForm, setExpenseForm] = useState(createEmptyExpenseForm(initialSelectedDriver));
+  const [paycheckForm, setPaycheckForm] = useState(createEmptyPaycheckForm(initialSelectedDriver));
+  const [fuelNotice, setFuelNotice] = useState('Add fuel receipts or manual fuel entries for daily tracking.');
+  const [expenseNotice, setExpenseNotice] = useState('Add truck receipts or manual expenses for yearly totals.');
+  const [weatherInfo, setWeatherInfo] = useState(null);
+  const [weatherNotice, setWeatherNotice] = useState('Weather is ready when location is allowed.');
   const [selectedCompanyFileIds, setSelectedCompanyFileIds] = useState([]);
   const [openCompanyMenuId, setOpenCompanyMenuId] = useState('');
   const [renameCompanyFileId, setRenameCompanyFileId] = useState('');
@@ -955,6 +1156,30 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!navigator.geolocation) {
+      setWeatherNotice('Weather needs browser location support.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const response = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,precipitation,wind_speed_10m`
+          );
+          const result = await response.json();
+          setWeatherInfo(result.current || null);
+          setWeatherNotice('Live weather updated.');
+        } catch {
+          setWeatherNotice('Live weather could not load right now.');
+        }
+      },
+      () => setWeatherNotice('Allow location to show live weather.')
+    );
+  }, []);
+
+  useEffect(() => {
     const handleResize = () => {
       const nextIsPhone = window.innerWidth <= 640;
       setIsPhoneViewport(nextIsPhone);
@@ -967,7 +1192,7 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-    useEffect(() => {
+  useEffect(() => {
     try {
       localStorage.setItem(
         STORAGE_KEY,
@@ -991,7 +1216,6 @@ function App() {
     selectedDriver,
   ]);
 
-
   useEffect(() => {
     accountsRef.current = accounts;
   }, [accounts]);
@@ -1004,6 +1228,9 @@ function App() {
       savedFiles,
       waitSavedFiles,
       companyFiles,
+      fuelRecords,
+      expenseRecords,
+      paycheckRecords,
       messages,
       recycleBin,
       purgedRecycleIds,
@@ -1017,9 +1244,12 @@ function App() {
     adminNotificationEmail,
     clearedMoveIds,
     companyFiles,
+    expenseRecords,
+    fuelRecords,
     deletedSourceIdsState,
     messages,
     moves,
+    paycheckRecords,
     purgedRecycleIds,
     restoredRecycleIds,
     recycleBin,
@@ -1055,90 +1285,50 @@ function App() {
   useEffect(() => {
     let active = true;
 
-    const loadNetworkInfo = async () => {
-      try {
-        const info = await fetchNetworkInfo();
-        if (!active) {
-          return;
-        }
-
-        if (info.driverLink) {
-          setDriverPhoneLink(info.driverLink);
-          setNetworkStatus(`Same Wi-Fi driver link: ${info.driverLink}`);
-        } else {
-          setDriverPhoneLink('');
-          setNetworkStatus('No Wi-Fi IPv4 address detected on this laptop yet.');
-        }
-      } catch {
-        if (active) {
-          setDriverPhoneLink('');
-          setNetworkStatus('Shared server not responding yet. Start node server.js on the laptop.');
-        }
-      }
-    };
-
-    loadNetworkInfo();
-    const intervalId = window.setInterval(loadNetworkInfo, 10000);
-    return () => {
-      active = false;
-      window.clearInterval(intervalId);
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
     const applyRemoteState = (remoteState) => {
-      const nextPurgedRecycleIds = remoteState.purgedRecycleIds || [];
-      const nextRestoredRecycleIds = remoteState.restoredRecycleIds || [];
-      const nextClearedMoveIds = remoteState.clearedMoveIds || [];
-      const nextDeletedSourceIdsState = remoteState.deletedSourceIdsState || [];
+      const normalizedRemoteState = normalizeSharedStateShape({
+        ...remoteState,
+        accounts: mergeAccounts(accountsRef.current, remoteState.accounts || []),
+      });
+      const nextPurgedRecycleIds = normalizedRemoteState.purgedRecycleIds || [];
+      const nextRestoredRecycleIds = normalizedRemoteState.restoredRecycleIds || [];
+      const nextClearedMoveIds = normalizedRemoteState.clearedMoveIds || [];
+      const nextDeletedSourceIdsState = normalizedRemoteState.deletedSourceIdsState || [];
+      const nextAccounts = normalizedRemoteState.accounts;
       isApplyingRemoteStateRef.current = true;
-      const nextAccounts = mergeAccounts(accountsRef.current, remoteState.accounts || []); setAccounts(nextAccounts);
-      setMoves(
-        (remoteState.moves || []).filter(
-          (move) => (move.screenshots?.length || 0) > 0 && !nextClearedMoveIds.includes(move.id)
-        )
-      );
-      setWaitRecords(
-        (remoteState.waitRecords || []).filter((record) => (record.screenshots?.length || 0) > 0)
-      );
-      setSavedFiles(remoteState.savedFiles || []);
-      setWaitSavedFiles(remoteState.waitSavedFiles || []);
-      setCompanyFiles(remoteState.companyFiles || []);
-      setMessages(remoteState.messages || []);
-      setRecycleBin(
-        (remoteState.recycleBin || []).filter(
-          (item) =>
-            !nextPurgedRecycleIds.includes(item.id) && !nextRestoredRecycleIds.includes(item.id)
-        )
-      );
+      setAccounts(nextAccounts);
+      setMoves(normalizedRemoteState.moves || []);
+      setWaitRecords(normalizedRemoteState.waitRecords || []);
+      setSavedFiles(normalizedRemoteState.savedFiles || []);
+      setWaitSavedFiles(normalizedRemoteState.waitSavedFiles || []);
+      setCompanyFiles(normalizedRemoteState.companyFiles || []);
+      setFuelRecords(normalizedRemoteState.fuelRecords || []);
+      setExpenseRecords(normalizedRemoteState.expenseRecords || []);
+      setPaycheckRecords(normalizedRemoteState.paycheckRecords || []);
+      setMessages(normalizedRemoteState.messages || []);
+      setRecycleBin(normalizedRemoteState.recycleBin || []);
       setPurgedRecycleIds(nextPurgedRecycleIds);
       setRestoredRecycleIds(nextRestoredRecycleIds);
       setClearedMoveIds(nextClearedMoveIds);
       setDeletedSourceIdsState(nextDeletedSourceIdsState);
-      setAdminNotificationEmail(remoteState.adminNotificationEmail || DEFAULT_ADMIN_ACCOUNT.email);
+      setAdminNotificationEmail(normalizedRemoteState.adminNotificationEmail || DEFAULT_ADMIN_ACCOUNT.email);
       sharedStateRef.current = {
         accounts: nextAccounts,
-        moves: (remoteState.moves || []).filter(
-          (move) => (move.screenshots?.length || 0) > 0 && !nextClearedMoveIds.includes(move.id)
-        ),
-        waitRecords: (remoteState.waitRecords || []).filter(
-          (record) => (record.screenshots?.length || 0) > 0
-        ),
-        savedFiles: remoteState.savedFiles || [],
-        waitSavedFiles: remoteState.waitSavedFiles || [],
-        companyFiles: remoteState.companyFiles || [],
-        messages: remoteState.messages || [],
-        recycleBin: (remoteState.recycleBin || []).filter(
-          (item) =>
-            !nextPurgedRecycleIds.includes(item.id) && !nextRestoredRecycleIds.includes(item.id)
-        ),
+        moves: normalizedRemoteState.moves || [],
+        waitRecords: normalizedRemoteState.waitRecords || [],
+        savedFiles: normalizedRemoteState.savedFiles || [],
+        waitSavedFiles: normalizedRemoteState.waitSavedFiles || [],
+        companyFiles: normalizedRemoteState.companyFiles || [],
+        fuelRecords: normalizedRemoteState.fuelRecords || [],
+        expenseRecords: normalizedRemoteState.expenseRecords || [],
+        paycheckRecords: normalizedRemoteState.paycheckRecords || [],
+        messages: normalizedRemoteState.messages || [],
+        recycleBin: normalizedRemoteState.recycleBin || [],
         purgedRecycleIds: nextPurgedRecycleIds,
         restoredRecycleIds: nextRestoredRecycleIds,
         clearedMoveIds: nextClearedMoveIds,
         deletedSourceIdsState: nextDeletedSourceIdsState,
-        adminNotificationEmail: remoteState.adminNotificationEmail || DEFAULT_ADMIN_ACCOUNT.email,
+        adminNotificationEmail: normalizedRemoteState.adminNotificationEmail || DEFAULT_ADMIN_ACCOUNT.email,
       };
       window.setTimeout(() => {
         isApplyingRemoteStateRef.current = false;
@@ -1163,46 +1353,7 @@ function App() {
         const currentSnapshot = JSON.stringify(currentState);
 
         if (remoteSnapshot !== currentSnapshot) {
-          const mergedState = {
-            ...remoteState,
-            accounts: mergeAccounts(currentState.accounts, remoteState.accounts || []),
-            moves: mergeRecordsById(currentState.moves, remoteState.moves || []),
-            waitRecords: mergeRecordsById(currentState.waitRecords, remoteState.waitRecords || []),
-            savedFiles: mergeRecordsById(currentState.savedFiles, remoteState.savedFiles || []),
-            waitSavedFiles: mergeRecordsById(
-              currentState.waitSavedFiles,
-              remoteState.waitSavedFiles || []
-            ),
-            companyFiles: mergeRecordsById(currentState.companyFiles, remoteState.companyFiles || []),
-            messages: mergeRecordsById(currentState.messages, remoteState.messages || []),
-            purgedRecycleIds: mergeStringLists(
-              currentState.purgedRecycleIds,
-              remoteState.purgedRecycleIds || []
-            ),
-            restoredRecycleIds: mergeStringLists(
-              currentState.restoredRecycleIds,
-              remoteState.restoredRecycleIds || []
-            ),
-            clearedMoveIds: mergeStringLists(
-              currentState.clearedMoveIds,
-              remoteState.clearedMoveIds || []
-            ),
-            deletedSourceIdsState: mergeStringLists(
-              currentState.deletedSourceIdsState,
-              remoteState.deletedSourceIdsState || []
-            ),
-          };
-          mergedState.recycleBin = mergeRecycleItems(
-            currentState.recycleBin,
-            remoteState.recycleBin || []
-          ).filter(
-            (item) =>
-              !mergedState.purgedRecycleIds.includes(item.id) &&
-              !mergedState.restoredRecycleIds.includes(item.id)
-          );
-          mergedState.moves = mergedState.moves.filter(
-            (move) => !mergedState.clearedMoveIds.includes(move.id)
-          );
+          const mergedState = mergeSharedStates(currentState, remoteState);
           const mergedSnapshot = JSON.stringify(mergedState);
 
           if (mergedSnapshot !== remoteSnapshot) {
@@ -1246,9 +1397,12 @@ function App() {
     adminNotificationEmail,
     clearedMoveIds,
     companyFiles,
+    expenseRecords,
+    fuelRecords,
     deletedSourceIdsState,
     messages,
     moves,
+    paycheckRecords,
     purgedRecycleIds,
     restoredRecycleIds,
     recycleBin,
@@ -1278,24 +1432,29 @@ function App() {
   }, [currentUser, portalFace, selectableDrivers, selectedDriver]);
 
   useEffect(() => {
+    setFuelForm((prev) => ({ ...prev, driverName: selectedDriver || prev.driverName }));
+    setExpenseForm((prev) => ({ ...prev, driverName: selectedDriver || prev.driverName }));
+    setPaycheckForm((prev) => ({ ...prev, driverName: selectedDriver || prev.driverName }));
+  }, [selectedDriver]);
+
+  useEffect(() => {
     const now = Date.now();
     const maxAdminAge = 30 * 24 * 60 * 60 * 1000;
     setRecycleBin((prev) => prev.filter((item) => !item?.deletedAtSort || now - item.deletedAtSort <= maxAdminAge));
   }, []);
 
- useEffect(() => {
-  if (
-    sharedStateReadyRef.current &&
-    currentUserId &&
-    accounts.length > 1 &&
-    !accounts.some((account) => account.id === currentUserId)
-  ) {
-    setCurrentUserId('');
-    setPortalFace('driver');
-    setSelectedDriver('');
-  }
-}, [accounts, currentUserId]);
-
+  useEffect(() => {
+    if (
+      sharedStateReadyRef.current &&
+      currentUserId &&
+      accounts.length > 1 &&
+      !accounts.some((account) => account.id === currentUserId)
+    ) {
+      setCurrentUserId('');
+      setPortalFace('driver');
+      setSelectedDriver('');
+    }
+  }, [accounts, currentUserId]);
 
   useEffect(() => {
     if (currentUser?.role === 'driver' && currentUser.appBlocked) {
@@ -1339,6 +1498,10 @@ function App() {
   };
 
   const handleLogin = async () => {
+    if (authBusy) {
+      return;
+    }
+    setAuthBusy(true);
     let latestAccounts = accounts;
 
     try {
@@ -1349,6 +1512,7 @@ function App() {
       }
     } catch {
       setAuthError('Online login service is waking up or unavailable. Wait one minute, then try again.');
+      setAuthBusy(false);
       return;
     }
 
@@ -1361,21 +1525,25 @@ function App() {
 
     if (!matchedAccount) {
       setAuthError('Wrong email or password.');
+      setAuthBusy(false);
       return;
     }
 
     if (matchedAccount.role === 'driver' && matchedAccount.appBlocked) {
       setAuthError('Unable to open your app. Contact with your admin.');
+      setAuthBusy(false);
       return;
     }
 
     if (requestedLoginFace === 'driver' && matchedAccount.role === 'admin') {
       setAuthError('Use the admin login link for the admin account.');
+      setAuthBusy(false);
       return;
     }
 
     if (requestedLoginFace === 'admin' && matchedAccount.role !== 'admin') {
       setAuthError('Use the driver login link for driver accounts.');
+      setAuthBusy(false);
       return;
     }
 
@@ -1386,6 +1554,7 @@ function App() {
     setLoginPassword('');
     setAuthError('');
     setForgotPasswordOpen(false);
+    setAuthBusy(false);
   };
 
   const handleLogout = () => {
@@ -1424,20 +1593,19 @@ function App() {
   };
 
   const handleChangePasswordFromLogin = async () => {
+    if (authBusy) {
+      return;
+    }
     const identifier = passwordChangeIdentifier.trim();
     const currentPassword = passwordChangeCurrent.trim();
     const nextPassword = passwordChangeNext.trim();
-
-    if (!backendReady) {
-      setAuthError('Shared login service is offline. Keep node server.js running on the computer.');
-      return;
-    }
 
     if (!identifier || !currentPassword || !nextPassword) {
       setAuthError('Enter email or username, current password, and new password.');
       return;
     }
 
+    setAuthBusy(true);
     let latestAccounts = accounts;
 
     try {
@@ -1447,7 +1615,8 @@ function App() {
         setAccounts(remoteState.accounts);
       }
     } catch {
-      setAuthError('Shared login service is offline. Keep node server.js running on the computer.');
+      setAuthError('Online login service is waking up or unavailable. Wait one minute, then try again.');
+      setAuthBusy(false);
       return;
     }
 
@@ -1460,6 +1629,7 @@ function App() {
 
     if (!matchedAccount) {
       setAuthError('Current email/username or password is wrong.');
+      setAuthBusy(false);
       return;
     }
 
@@ -1479,6 +1649,8 @@ function App() {
       setAuthError('Password changed successfully. You can now log in with the new password.');
     } catch (error) {
       setAuthError(`Could not change password. ${error.message}`);
+    } finally {
+      setAuthBusy(false);
     }
   };
 
@@ -2002,9 +2174,12 @@ function App() {
     const freshShots = uniqueShots.filter((shot) => !existingShotSignatures.has(getShotSignature(shot)));
     const nextMoves = freshShots.map((shot, index) => {
       const extracted = shot.extracted || deriveFieldsFromText(shot.ocrText || '', shot.name);
+      const cleanMoveNumber =
+        pickCleanMoveNumber(extracted.moveNumber, shot.ocrText, shot.name) ||
+        `PENDING-${createdAt.sortValue}-${index + 1}`;
       return {
         id: `${Date.now()}-${index}`,
-        moveNumber: extracted.moveNumber || `PENDING-${createdAt.sortValue}-${index + 1}`,
+        moveNumber: cleanMoveNumber,
         driverName: selectedDriver,
         origin: extracted.origin || '-',
         containerNumber: extracted.containerNumber || '-',
@@ -2012,7 +2187,7 @@ function App() {
         miles: extracted.miles || '-',
         xatDateTime: extracted.xatDateTime || '-',
         xatDateTimeSort: extracted.xatDateTimeSort || 0,
-        dateAdded: createdAt.dateOnly,
+        dateAdded: form.entryDate || createdAt.dateOnly,
         recordedAt: createdAt.display,
         recordedAtSort: createdAt.sortValue + index,
         screenshots: [shot],
@@ -2063,6 +2238,128 @@ function App() {
 
     setWaitRecords((prev) => [...nextWaitRecords, ...prev]);
     resetWaitForm(`Saved ${nextWaitRecords.length} wait record(s) for ${selectedDriver}.`);
+  };
+
+  const handleFuelReceiptUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const receipt = await fileToPreview(file);
+    setFuelForm((prev) => ({ ...prev, receipt }));
+    setFuelNotice('Reading fuel receipt for KM, litres, and total...');
+
+    try {
+      const result = await Tesseract.recognize(receipt.previewUrl, 'eng');
+      const extracted = deriveFuelFieldsFromText(result?.data?.text || '', file.name);
+      setFuelForm((prev) => ({
+        ...prev,
+        entryDate: extracted.entryDate || prev.entryDate,
+        km: extracted.km || prev.km,
+        fuelQuantity: extracted.fuelQuantity || prev.fuelQuantity,
+        fuelCost: extracted.fuelCost || prev.fuelCost,
+        station: extracted.station || prev.station,
+        receipt: { ...receipt, ocrText: result?.data?.text || '', extracted },
+      }));
+      setFuelNotice('Fuel receipt extracted. Check the values, then save fuel entry.');
+    } catch {
+      setFuelNotice('Fuel receipt OCR failed. You can still type fuel manually.');
+    }
+  };
+
+  const handleExpenseReceiptUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const receipt = await fileToPreview(file);
+    setExpenseForm((prev) => ({ ...prev, receipt }));
+    setExpenseNotice('Reading expense receipt for vendor and total...');
+
+    try {
+      const result = await Tesseract.recognize(receipt.previewUrl, 'eng');
+      const extracted = deriveExpenseFieldsFromText(result?.data?.text || '', file.name);
+      setExpenseForm((prev) => ({
+        ...prev,
+        entryDate: extracted.entryDate || prev.entryDate,
+        vendor: extracted.vendor || prev.vendor,
+        total: extracted.total || prev.total,
+        receipt: { ...receipt, ocrText: result?.data?.text || '', extracted },
+      }));
+      setExpenseNotice('Expense receipt extracted. Check the values, then save expense.');
+    } catch {
+      setExpenseNotice('Expense receipt OCR failed. You can still type the expense manually.');
+    }
+  };
+
+  const saveFuelRecord = () => {
+    const createdAt = getTimestampParts();
+    const nextRecord = {
+      id: `fuel-${createdAt.sortValue}`,
+      driverName: selectedDriver,
+      entryDate: fuelForm.entryDate || createdAt.dateOnly,
+      entryDateSort: dateInputToSort(fuelForm.entryDate || createdAt.dateOnly),
+      km: fuelForm.km || '-',
+      fuelQuantity: fuelForm.fuelQuantity || '-',
+      fuelCost: fuelForm.fuelCost || '-',
+      station: fuelForm.station || '-',
+      notes: fuelForm.notes || '',
+      receipt: fuelForm.receipt,
+      recordedAt: createdAt.display,
+      recordedAtSort: createdAt.sortValue,
+    };
+    setFuelRecords((prev) => sortByXatDateTime([nextRecord, ...prev], (record) => ({
+      xatDateTimeSort: record.entryDateSort || record.recordedAtSort || 0,
+      name: record.station || '',
+    })));
+    setFuelForm(createEmptyFuelForm(selectedDriver));
+    setFuelNotice('Fuel entry saved.');
+  };
+
+  const saveExpenseRecord = () => {
+    const createdAt = getTimestampParts();
+    const nextRecord = {
+      id: `expense-${createdAt.sortValue}`,
+      driverName: selectedDriver,
+      entryDate: expenseForm.entryDate || createdAt.dateOnly,
+      entryDateSort: dateInputToSort(expenseForm.entryDate || createdAt.dateOnly),
+      category: expenseForm.category || 'Truck Receipt',
+      vendor: expenseForm.vendor || '-',
+      total: expenseForm.total || '-',
+      notes: expenseForm.notes || '',
+      receipt: expenseForm.receipt,
+      recordedAt: createdAt.display,
+      recordedAtSort: createdAt.sortValue,
+    };
+    setExpenseRecords((prev) => sortByXatDateTime([nextRecord, ...prev], (record) => ({
+      xatDateTimeSort: record.entryDateSort || record.recordedAtSort || 0,
+      name: record.vendor || '',
+    })));
+    setExpenseForm(createEmptyExpenseForm(selectedDriver));
+    setExpenseNotice('Expense saved.');
+  };
+
+  const savePaycheckRecord = () => {
+    const createdAt = getTimestampParts();
+    const nextRecord = {
+      id: `paycheck-${createdAt.sortValue}`,
+      driverName: selectedDriver,
+      startDate: paycheckForm.startDate,
+      startDateSort: dateInputToSort(paycheckForm.startDate),
+      endDate: paycheckForm.endDate,
+      endDateSort: dateInputToSort(paycheckForm.endDate),
+      paycheckAmount: paycheckForm.paycheckAmount || '-',
+      notes: paycheckForm.notes || '',
+      recordedAt: createdAt.display,
+      recordedAtSort: createdAt.sortValue,
+    };
+    setPaycheckRecords((prev) => sortByXatDateTime([nextRecord, ...prev], (record) => ({
+      xatDateTimeSort: record.endDateSort || record.recordedAtSort || 0,
+      name: record.driverName || '',
+    })));
+    setPaycheckForm(createEmptyPaycheckForm(selectedDriver));
   };
 
   const filteredMoves = useMemo(() => {
@@ -2120,6 +2417,76 @@ function App() {
             .includes(query);
     });
   }, [waitRecords, waitSearch, selectedDriver]);
+
+  const selectedFuelRecords = useMemo(
+    () => fuelRecords.filter((record) => record.driverName === selectedDriver),
+    [fuelRecords, selectedDriver]
+  );
+
+  const selectedExpenseRecords = useMemo(
+    () => expenseRecords.filter((record) => record.driverName === selectedDriver),
+    [expenseRecords, selectedDriver]
+  );
+
+  const selectedPaycheckRecords = useMemo(
+    () => paycheckRecords.filter((record) => record.driverName === selectedDriver),
+    [paycheckRecords, selectedDriver]
+  );
+
+  const dailyMiles = useMemo(() => {
+    const totals = new Map();
+    filteredMoves.forEach((move) => {
+      const key = move.xatDateTime?.match(/\d{4}-\d{2}-\d{2}/)?.[0] || move.dateAdded || 'No date';
+      const miles = Number(String(move.miles || '').replace(/[^\d.]/g, '')) || 0;
+      totals.set(key, (totals.get(key) || 0) + miles);
+    });
+    return Array.from(totals.entries())
+      .map(([date, miles]) => ({ date, miles }))
+      .sort((a, b) => dateInputToSort(a.date) - dateInputToSort(b.date));
+  }, [filteredMoves]);
+
+  const fuelSummary = useMemo(() => {
+    const sorted = [...selectedFuelRecords].sort((a, b) => (a.entryDateSort || 0) - (b.entryDateSort || 0));
+    const totalFuel = sorted.reduce((sum, record) => sum + (Number(record.fuelQuantity) || 0), 0);
+    const totalCost = sorted.reduce((sum, record) => sum + (Number(record.fuelCost) || 0), 0);
+    const firstKm = Number(sorted[0]?.km) || 0;
+    const lastKm = Number(sorted[sorted.length - 1]?.km) || 0;
+    const kmDriven = Math.max(0, lastKm - firstKm);
+    const avgKmPerFuelUnit = totalFuel ? kmDriven / totalFuel : 0;
+    const recentGap =
+      sorted.length >= 2
+        ? Math.max(0, (Number(sorted[sorted.length - 1].km) || 0) - (Number(sorted[sorted.length - 2].km) || 0))
+        : 0;
+    const nextFillKm = lastKm && recentGap ? lastKm + recentGap : 0;
+    return { totalFuel, totalCost, kmDriven, avgKmPerFuelUnit, nextFillKm };
+  }, [selectedFuelRecords]);
+
+  const yearlyExpenseTotal = useMemo(() => {
+    const year = new Date().getFullYear();
+    return selectedExpenseRecords
+      .filter((record) => String(record.entryDate || '').startsWith(String(year)))
+      .reduce((sum, record) => sum + (Number(record.total) || 0), 0);
+  }, [selectedExpenseRecords]);
+
+  const paycheckComparisons = useMemo(
+    () =>
+      selectedPaycheckRecords.map((paycheck) => {
+        const miles = filteredMoves.reduce((sum, move) => {
+          const sort = move.xatDateTimeSort || move.recordedAtSort || 0;
+          if (sort < paycheck.startDateSort || sort > paycheck.endDateSort + 24 * 60 * 60 * 1000) {
+            return sum;
+          }
+          return sum + (Number(String(move.miles || '').replace(/[^\d.]/g, '')) || 0);
+        }, 0);
+        const amount = Number(paycheck.paycheckAmount) || 0;
+        return {
+          ...paycheck,
+          miles,
+          payPerMile: miles ? amount / miles : 0,
+        };
+      }),
+    [filteredMoves, selectedPaycheckRecords]
+  );
 
   const sortedCaptureScreenshots = useMemo(
     () => sortByXatDateTime(form.screenshots, (shot) => shot.extracted || shot),
@@ -2248,6 +2615,23 @@ function App() {
     return activeComparisonRows.filter(
       (move) => !pdfMoveSet.has(normalizeMoveNumber(move.moveNumber))
     );
+  }, [companyMoveNumbers, activeComparisonRows]);
+
+  const matchedComparisonMoves = useMemo(() => {
+    if (!companyMoveNumbers.length) {
+      return [];
+    }
+
+    const pdfMoveSet = new Set(companyMoveNumbers.map(normalizeMoveNumber));
+    const matchedByMoveNumber = new Map();
+    activeComparisonRows.forEach((move) => {
+      const normalizedMoveNumber = normalizeMoveNumber(move.moveNumber);
+      if (normalizedMoveNumber && pdfMoveSet.has(normalizedMoveNumber)) {
+        matchedByMoveNumber.set(normalizedMoveNumber, move);
+      }
+    });
+
+    return Array.from(matchedByMoveNumber.values());
   }, [companyMoveNumbers, activeComparisonRows]);
 
   const companyExtraMoves = useMemo(() => {
@@ -2491,9 +2875,19 @@ function App() {
     }
 
     const idsToClear = driverMoves.map((move) => move.id);
-    setClearedMoveIds((prev) => mergeStringLists(prev, idsToClear));
-    setMoves((prev) => prev.filter((move) => !idsToClear.includes(move.id)));
+    const nextClearedMoveIds = mergeStringLists(clearedMoveIds, idsToClear);
+    const nextMoves = moves.filter((move) => !idsToClear.includes(move.id));
+    setClearedMoveIds(nextClearedMoveIds);
+    setMoves(nextMoves);
     setSearch('');
+    sharedStateRef.current = normalizeSharedStateShape({
+      ...sharedStateRef.current,
+      moves: nextMoves,
+      clearedMoveIds: nextClearedMoveIds,
+    });
+    saveSharedState(sharedStateRef.current).catch(() => {
+      // Keep local clear if backend save is delayed.
+    });
     setNotice(`Cleared ${driverRecordCount} move record(s) for ${selectedDriver}.`);
   };
 
@@ -2532,6 +2926,34 @@ function App() {
     setEditingMoveId('');
     setMoveDraft(null);
     setNotice('Move record updated.');
+  };
+
+  const deleteMoveRecord = (moveId) => {
+    const targetMove = moves.find((move) => move.id === moveId);
+    if (!targetMove) {
+      setNotice('That move is already removed.');
+      return;
+    }
+
+    const nextClearedMoveIds = mergeStringLists(clearedMoveIds, [moveId]);
+    const nextMoves = moves.filter((move) => move.id !== moveId);
+    const nextRecycleBin = [createDeletedItem('move-record', targetMove), ...recycleBin];
+
+    setMoves(nextMoves);
+    setClearedMoveIds(nextClearedMoveIds);
+    setRecycleBin(nextRecycleBin);
+    setEditingMoveId('');
+    setMoveDraft(null);
+    sharedStateRef.current = normalizeSharedStateShape({
+      ...sharedStateRef.current,
+      moves: nextMoves,
+      recycleBin: nextRecycleBin,
+      clearedMoveIds: nextClearedMoveIds,
+    });
+    saveSharedState(sharedStateRef.current).catch(() => {
+      // Keep local delete if backend save is delayed.
+    });
+    setNotice(`Removed move ${targetMove.moveNumber || ''}.`);
   };
 
   const startEditingWaitRecord = (record) => {
@@ -2846,6 +3268,7 @@ function App() {
     let nextSavedFiles = savedFiles;
     let nextWaitSavedFiles = waitSavedFiles;
     let nextCompanyFiles = companyFiles;
+    let nextMoves = moves;
     let nextRecycleBin = recycleBin.filter((item) => !selectedRecycleIds.includes(item.id));
     const restoredSourceIds = [];
 
@@ -2868,6 +3291,15 @@ function App() {
         nextCompanyFiles = nextCompanyFiles.some((file) => file.id === item.payload.id)
           ? nextCompanyFiles
           : [item.payload, ...nextCompanyFiles];
+      } else if (item.type === 'move-record') {
+        restoredSourceIds.push(item.payload.id);
+        nextMoves = sortByXatDateTime(
+          dedupeMoveRecords(
+            nextMoves.some((move) => move.id === item.payload.id)
+              ? nextMoves
+              : [item.payload, ...nextMoves]
+          )
+        );
       } else if (item.type === 'screenshot') {
         setForm((prev) => ({
           ...prev,
@@ -2890,25 +3322,30 @@ function App() {
     const nextDeletedSourceIdsState = deletedSourceIdsState.filter(
       (id) => !restoredSourceIds.includes(id)
     );
+    const nextClearedMoveIds = clearedMoveIds.filter((id) => !restoredSourceIds.includes(id));
     nextSavedFiles = sortFilesNewestFirst(nextSavedFiles);
     nextWaitSavedFiles = sortFilesNewestFirst(nextWaitSavedFiles);
     nextCompanyFiles = sortFilesNewestFirst(nextCompanyFiles);
+    setMoves(nextMoves);
     setSavedFiles(nextSavedFiles);
     setWaitSavedFiles(nextWaitSavedFiles);
     setCompanyFiles(nextCompanyFiles);
     setPurgedRecycleIds(nextPurgedRecycleIds);
     setRestoredRecycleIds(nextRestoredRecycleIds);
+    setClearedMoveIds(nextClearedMoveIds);
     setDeletedSourceIdsState(nextDeletedSourceIdsState);
     setRecycleBin(nextRecycleBin);
     setSelectedRecycleIds([]);
     sharedStateRef.current = {
       ...sharedStateRef.current,
+      moves: nextMoves,
       savedFiles: nextSavedFiles,
       waitSavedFiles: nextWaitSavedFiles,
       companyFiles: nextCompanyFiles,
       recycleBin: nextRecycleBin,
       purgedRecycleIds: nextPurgedRecycleIds,
       restoredRecycleIds: nextRestoredRecycleIds,
+      clearedMoveIds: nextClearedMoveIds,
       deletedSourceIdsState: nextDeletedSourceIdsState,
     };
     saveSharedState(sharedStateRef.current).catch(() => {
@@ -3181,11 +3618,11 @@ function App() {
               />
             </label>
             {!!authError && <p className="notice danger-text">{authError}</p>}
-           <p className={backendReady ? 'notice success-text' : 'notice danger-text'}>
-  {backendReady
-    ? 'Shared login service connected.'
-    : 'Online login service is connecting. If this is the first login, wait one minute and try again.'}
-</p>
+            <p className={backendReady ? 'notice success-text' : 'notice danger-text'}>
+              {backendReady
+                ? 'Shared login service connected.'
+                : 'Online login service is connecting. If this is the first login, wait one minute and try again.'}
+            </p>
             {requestedLoginFace === 'admin' ? (
               <div className="notice">
                 Admin login:
@@ -3198,8 +3635,8 @@ function App() {
               </div>
             ) : null}
               <div className="inline-actions">
-                <button className="primary-btn" onClick={handleLogin}>
-                  Login
+                <button className="primary-btn" onClick={handleLogin} disabled={authBusy}>
+                  {authBusy ? 'Checking...' : 'Login'}
                 </button>
                 <button className="secondary-btn" onClick={() => openAuthDialog('forgot')}>
                   Forgot Password
@@ -3358,11 +3795,6 @@ function App() {
                       >
                         Driver Face
                       </button>
-                      <div className="portal-link-note">
-                        <span>Driver Link</span>
-                        <strong>{driverPhoneLink || 'Waiting for live Wi-Fi link...'}</strong>
-                        <small>{networkStatus}</small>
-                      </div>
                     </div>
                   )}
                 </div>
@@ -3406,6 +3838,15 @@ function App() {
                       }}
                     >
                       Wait Time
+                    </button>
+                    <button
+                      className={activeTab === 'fuel' ? 'tab active' : 'tab'}
+                      onClick={() => {
+                        setActiveTab('fuel');
+                        setMobileMenuOpen(false);
+                      }}
+                    >
+                      Fuel & Expenses
                     </button>
                   </div>
                 )}
@@ -3480,11 +3921,6 @@ function App() {
                         >
                           Driver Face
                         </button>
-                        <div className="portal-link-note">
-                          <span>Driver Link</span>
-                          <strong>{driverPhoneLink || 'Waiting for live Wi-Fi link...'}</strong>
-                          <small>{networkStatus}</small>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -3524,6 +3960,15 @@ function App() {
                   }}
                 >
                   Wait Time
+                </button>
+                <button
+                  className={activeTab === 'fuel' ? 'tab active' : 'tab'}
+                  onClick={() => {
+                    setActiveTab('fuel');
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  Fuel & Expenses
                 </button>
                   <button
                     className={activeTab === 'messages' ? 'tab active' : 'tab'}
@@ -3598,6 +4043,15 @@ function App() {
                   You can still correct any value before saving or later inside the live editor.
                 </p>
               </div>
+              <label className="date-field">
+                Entry Date
+                <input
+                  type="date"
+                  value={form.entryDate}
+                  onChange={(event) => setForm((prev) => ({ ...prev, entryDate: event.target.value }))}
+                />
+                <span>Leave it as today, or choose the screenshot work date.</span>
+              </label>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -3702,10 +4156,15 @@ function App() {
                   <button
                     className="secondary-btn"
                     onClick={() => downloadMoveFilesToComputer(selectedSavedFileIds)}
+                    disabled={!selectedSavedFileIds.length}
                   >
                     Save Selected To Computer
                   </button>
-                  <button className="secondary-btn ghost-danger" onClick={deleteSelectedSavedFiles}>
+                  <button
+                    className="secondary-btn ghost-danger"
+                    onClick={deleteSelectedSavedFiles}
+                    disabled={!selectedSavedFileIds.length}
+                  >
                     Delete Selected
                   </button>
                 </div>
@@ -3920,6 +4379,49 @@ function App() {
             )}
 
             {comparisonRequested && (
+            <>
+            <section className="match-results same-box">
+              <div className="match-card-head">
+                <h3>Matched Moves In Both Files</h3>
+                <span className="empty-pill">{matchedComparisonMoves.length} matched</span>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Move #</th>
+                      <th>Origin</th>
+                      <th>Container #</th>
+                      <th>Destination</th>
+                      <th>Miles</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matchedComparisonMoves.map((move) => (
+                      <tr key={`matched-${move.id || move.moveNumber}`} className="matched-move-row">
+                        <td className="accent-text">{move.moveNumber}</td>
+                        <td>{move.origin}</td>
+                        <td>{move.containerNumber}</td>
+                        <td>{move.destination}</td>
+                        <td>{move.miles}</td>
+                        <td><span className="ocr-pill success">Matched</span></td>
+                      </tr>
+                    ))}
+                    {!!companyMoveNumbers.length && !matchedComparisonMoves.length && (
+                      <tr>
+                        <td colSpan="6">
+                          <div className="empty-state small-empty">
+                            No matching moves were found between the selected files and company PDFs.
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
             <div className="match-grid results-grid">
               <section className="match-results">
               <div className="match-card-head">
@@ -4020,6 +4522,7 @@ function App() {
                 </div>
               </section>
             </div>
+            </>
             )}
 
             {comparisonRequested &&
@@ -4453,6 +4956,262 @@ function App() {
           </section>
         )}
 
+        {activeTab === 'fuel' && (
+          <section className="panel">
+            <div className="panel-header split">
+              <div>
+                <h2>Fuel & Expenses</h2>
+                <p>
+                  Track live weather, daily miles, fuel receipts, truck expenses, and two-week
+                  paycheck comparisons for {selectedDriver}.
+                </p>
+              </div>
+              <div className="capture-summary">
+                <span>Live weather</span>
+                <strong>
+                  {weatherInfo ? `${Math.round(weatherInfo.temperature_2m)}°C` : 'Waiting'}
+                </strong>
+                <span>{weatherInfo ? `Wind ${Math.round(weatherInfo.wind_speed_10m)} km/h` : weatherNotice}</span>
+              </div>
+            </div>
+
+            <div className="match-grid finance-grid">
+              <section className="match-card">
+                <div className="match-card-head">
+                  <h3>Fuel Tracking</h3>
+                  <span className="empty-pill">{selectedFuelRecords.length} entries</span>
+                </div>
+                <div className="form-grid compact-form">
+                  <label>
+                    Fuel Date
+                    <input
+                      type="date"
+                      value={fuelForm.entryDate}
+                      onChange={(event) => setFuelForm((prev) => ({ ...prev, entryDate: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Current KM
+                    <input
+                      value={fuelForm.km}
+                      onChange={(event) => setFuelForm((prev) => ({ ...prev, km: event.target.value }))}
+                      placeholder="Truck KM"
+                    />
+                  </label>
+                  <label>
+                    Fuel Quantity
+                    <input
+                      value={fuelForm.fuelQuantity}
+                      onChange={(event) => setFuelForm((prev) => ({ ...prev, fuelQuantity: event.target.value }))}
+                      placeholder="Litres or gallons"
+                    />
+                  </label>
+                  <label>
+                    Fuel Total
+                    <input
+                      value={fuelForm.fuelCost}
+                      onChange={(event) => setFuelForm((prev) => ({ ...prev, fuelCost: event.target.value }))}
+                      placeholder="Receipt total"
+                    />
+                  </label>
+                  <label>
+                    Station
+                    <input
+                      value={fuelForm.station}
+                      onChange={(event) => setFuelForm((prev) => ({ ...prev, station: event.target.value }))}
+                      placeholder="Fuel station"
+                    />
+                  </label>
+                  <label>
+                    Receipt Upload
+                    <input type="file" accept="image/*" onChange={handleFuelReceiptUpload} />
+                  </label>
+                </div>
+                <div className="action-bar">
+                  <button className="primary-btn" onClick={saveFuelRecord}>
+                    Save Fuel Entry
+                  </button>
+                  <span className="notice">{fuelNotice}</span>
+                </div>
+                <div className="summary-strip">
+                  <span>Total fuel: <strong>{fuelSummary.totalFuel.toFixed(2)}</strong></span>
+                  <span>Total cost: <strong>${fuelSummary.totalCost.toFixed(2)}</strong></span>
+                  <span>KM tracked: <strong>{Math.round(fuelSummary.kmDriven)}</strong></span>
+                  <span>Next fill estimate: <strong>{fuelSummary.nextFillKm ? `${Math.round(fuelSummary.nextFillKm)} KM` : '-'}</strong></span>
+                </div>
+                <div className="table-wrap mini-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>KM</th>
+                        <th>Fuel</th>
+                        <th>Total</th>
+                        <th>Station</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedFuelRecords.map((record) => (
+                        <tr key={record.id}>
+                          <td>{record.entryDate}</td>
+                          <td>{record.km}</td>
+                          <td>{record.fuelQuantity}</td>
+                          <td>{record.fuelCost}</td>
+                          <td>{record.station}</td>
+                        </tr>
+                      ))}
+                      {!selectedFuelRecords.length && (
+                        <tr><td colSpan="5"><div className="empty-state small-empty">No fuel entries yet.</div></td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section className="match-card">
+                <div className="match-card-head">
+                  <h3>Truck Expenses</h3>
+                  <span className="empty-pill">Year total ${yearlyExpenseTotal.toFixed(2)}</span>
+                </div>
+                <div className="form-grid compact-form">
+                  <label>
+                    Date
+                    <input
+                      type="date"
+                      value={expenseForm.entryDate}
+                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, entryDate: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Category
+                    <input
+                      value={expenseForm.category}
+                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, category: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Vendor
+                    <input
+                      value={expenseForm.vendor}
+                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, vendor: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Total
+                    <input
+                      value={expenseForm.total}
+                      onChange={(event) => setExpenseForm((prev) => ({ ...prev, total: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Receipt Upload
+                    <input type="file" accept="image/*" onChange={handleExpenseReceiptUpload} />
+                  </label>
+                </div>
+                <div className="action-bar">
+                  <button className="primary-btn" onClick={saveExpenseRecord}>
+                    Save Expense
+                  </button>
+                  <span className="notice">{expenseNotice}</span>
+                </div>
+                <div className="table-wrap mini-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Category</th>
+                        <th>Vendor</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedExpenseRecords.map((record) => (
+                        <tr key={record.id}>
+                          <td>{record.entryDate}</td>
+                          <td>{record.category}</td>
+                          <td>{record.vendor}</td>
+                          <td>{record.total}</td>
+                        </tr>
+                      ))}
+                      {!selectedExpenseRecords.length && (
+                        <tr><td colSpan="4"><div className="empty-state small-empty">No expenses yet.</div></td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+
+            <section className="match-card full-width-card">
+              <div className="match-card-head">
+                <h3>Daily Miles & Two-Week Paycheck</h3>
+                <span className="empty-pill">{dailyMiles.length} driving days</span>
+              </div>
+              <div className="form-grid compact-form">
+                <label>
+                  Start Date
+                  <input
+                    type="date"
+                    value={paycheckForm.startDate}
+                    onChange={(event) => setPaycheckForm((prev) => ({ ...prev, startDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  End Date
+                  <input
+                    type="date"
+                    value={paycheckForm.endDate}
+                    onChange={(event) => setPaycheckForm((prev) => ({ ...prev, endDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Paycheck Amount
+                  <input
+                    value={paycheckForm.paycheckAmount}
+                    onChange={(event) => setPaycheckForm((prev) => ({ ...prev, paycheckAmount: event.target.value }))}
+                    placeholder="Check amount"
+                  />
+                </label>
+              </div>
+              <div className="action-bar">
+                <button className="primary-btn" onClick={savePaycheckRecord}>
+                  Save Paycheck Comparison
+                </button>
+              </div>
+              <div className="table-wrap mini-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th>Miles</th>
+                      <th>Paycheck</th>
+                      <th>Pay / Mile</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paycheckComparisons.map((record) => (
+                      <tr key={record.id}>
+                        <td>{record.startDate} to {record.endDate}</td>
+                        <td>{record.miles.toFixed(1)}</td>
+                        <td>{record.paycheckAmount}</td>
+                        <td>{record.payPerMile ? `$${record.payPerMile.toFixed(2)}` : '-'}</td>
+                      </tr>
+                    ))}
+                    {!paycheckComparisons.length && (
+                      <tr><td colSpan="4"><div className="empty-state small-empty">No paycheck comparisons saved yet.</div></td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="summary-strip">
+                {dailyMiles.slice(-14).map((day) => (
+                  <span key={day.date}>{day.date}: <strong>{day.miles.toFixed(1)} miles</strong></span>
+                ))}
+              </div>
+            </section>
+          </section>
+        )}
+
         {activeTab === 'messages' && (
           <section className="panel">
             <div className="panel-header split">
@@ -4620,7 +5379,11 @@ function App() {
                 <button className="secondary-btn" onClick={saveRecordsToSavedFiles}>
                   Save To Files Folder
                 </button>
-                <button className="secondary-btn ghost-danger" onClick={clearSelectedDriverRecords}>
+                <button
+                  className="secondary-btn ghost-danger"
+                  onClick={clearSelectedDriverRecords}
+                  disabled={!filteredMoves.length}
+                >
                   Clear Data
                 </button>
               </div>
@@ -4757,11 +5520,24 @@ function App() {
                             </button>
                           </div>
                         ) : isAdminUser ? (
-                          <button className="secondary-btn mini-btn" onClick={() => startEditingMove(move)}>
-                            Edit
-                          </button>
+                          <div className="inline-actions">
+                            <button className="secondary-btn mini-btn" onClick={() => startEditingMove(move)}>
+                              Edit
+                            </button>
+                            <button
+                              className="secondary-btn mini-btn ghost-danger"
+                              onClick={() => deleteMoveRecord(move.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         ) : (
-                          <span className="empty-pill">View only</span>
+                          <button
+                            className="secondary-btn mini-btn ghost-danger"
+                            onClick={() => deleteMoveRecord(move.id)}
+                          >
+                            Delete
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -4814,10 +5590,18 @@ function App() {
                       ? 'Clear Selection'
                       : 'Select All'}
                   </button>
-                  <button className="secondary-btn" onClick={restoreRecycleItems}>
+                  <button
+                    className="secondary-btn"
+                    onClick={restoreRecycleItems}
+                    disabled={!selectedRecycleIds.length}
+                  >
                     Revert Selected
                   </button>
-                  <button className="secondary-btn ghost-danger" onClick={permanentlyDeleteRecycleItems}>
+                  <button
+                    className="secondary-btn ghost-danger"
+                    onClick={permanentlyDeleteRecycleItems}
+                    disabled={!selectedRecycleIds.length}
+                  >
                     Delete Selected
                   </button>
                 </div>
@@ -4921,8 +5705,12 @@ function App() {
                     />
                   </label>
                   <div className="inline-actions">
-                    <button className="primary-btn" onClick={handleChangePasswordFromLogin}>
-                      Update Password
+                    <button
+                      className="primary-btn"
+                      onClick={handleChangePasswordFromLogin}
+                      disabled={authBusy}
+                    >
+                      {authBusy ? 'Updating...' : 'Update Password'}
                     </button>
                   </div>
                 </>
