@@ -674,6 +674,14 @@
   background: linear-gradient(180deg, rgba(220, 252, 231, 0.65), rgba(255, 255, 255, 0.98));
 }
 
+.matched-move-row {
+  background: rgba(220, 252, 231, 0.45);
+}
+
+.matched-move-row td {
+  border-bottom-color: #bbf7d0;
+}
+
 .match-card-head {
   display: flex;
   align-items: center;
@@ -1141,6 +1149,64 @@ td select {
 
 .small-empty {
   margin: 10px 0;
+}
+
+.date-field {
+  display: grid;
+  gap: 8px;
+  min-width: min(100%, 280px);
+  color: #475569;
+  font-weight: 800;
+}
+
+.date-field span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.finance-grid {
+  align-items: start;
+}
+
+.compact-form {
+  gap: 14px;
+}
+
+.compact-form label {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.summary-strip span {
+  border: 1px solid #dbeafe;
+  background: linear-gradient(135deg, #f8fafc, #eff6ff);
+  border-radius: 18px;
+  color: #475569;
+  padding: 10px 14px;
+}
+
+.summary-strip strong {
+  color: #0f172a;
+}
+
+.mini-table {
+  margin-top: 12px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.full-width-card {
+  margin-top: 20px;
 }
 
 .modal-backdrop {
