@@ -1197,6 +1197,7 @@ function App() {
   const [fuelNotice, setFuelNotice] = useState('Add fuel receipts or manual fuel entries for daily tracking.');
   const [expenseNotice, setExpenseNotice] = useState('Add truck receipts or manual expenses for yearly totals.');
   const [weatherInfo, setWeatherInfo] = useState(null);
+  const [weatherHourly, setWeatherHourly] = useState([]);
   const [weatherForecast, setWeatherForecast] = useState([]);
   const [weatherLocationLabel, setWeatherLocationLabel] = useState('');
   const [weatherNotice, setWeatherNotice] = useState('Weather is loading for the dashboard.');
@@ -2593,12 +2594,24 @@ function App() {
 
       const loadForecast = async (latitude, longitude, label) => {
         const response = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,wind_speed_10m,time&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&forecast_days=7&timezone=auto`
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,time&hourly=temperature_2m,weather_code,time&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,precipitation_probability_max&forecast_days=7&timezone=auto`
         );
         const result = await response.json();
         if (cancelled) {
           return;
         }
+
+        const currentTime = new Date(result.current?.time || Date.now()).getTime();
+        const hourly = result.hourly || {};
+        const nextHours = (hourly.time || [])
+          .map((hour, index) => ({
+            time: hour,
+            sortValue: new Date(hour).getTime(),
+            temperature: (hourly.temperature_2m || [])[index],
+            condition: getWeatherConditionLabel((hourly.weather_code || [])[index]),
+          }))
+          .filter((hour) => Number.isFinite(hour.sortValue) && hour.sortValue >= currentTime - 30 * 60 * 1000)
+          .slice(0, 8);
 
         const daily = result.daily || {};
         const forecast = (daily.time || []).map((day, index) => ({
@@ -2607,9 +2620,11 @@ function App() {
           high: (daily.temperature_2m_max || [])[index],
           low: (daily.temperature_2m_min || [])[index],
           wind: (daily.wind_speed_10m_max || [])[index],
+          precipitation: (daily.precipitation_probability_max || [])[index],
         }));
 
         setWeatherInfo(result.current || null);
+        setWeatherHourly(nextHours);
         setWeatherForecast(forecast);
         setWeatherLocationLabel(label);
         setWeatherNotice('7-day weather updated.');
@@ -2698,6 +2713,7 @@ function App() {
             return;
           }
           setWeatherInfo(null);
+          setWeatherHourly([]);
           setWeatherForecast([]);
           setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
           setWeatherNotice('Weather location is using the default city.');
@@ -2705,6 +2721,7 @@ function App() {
       } catch {
         if (!cancelled) {
           setWeatherInfo(null);
+          setWeatherHourly([]);
           setWeatherForecast([]);
           setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
           setWeatherNotice('Weather could not load right now.');
@@ -4263,25 +4280,37 @@ function App() {
 
             <div className="match-grid weather-dashboard-grid">
               <section className="match-card dashboard-weather-card">
-                <div className="match-card-head">
-                  <h3>Today</h3>
-                </div>
-                <div className="weather-now-grid">
-                  <div className="weather-stat-tile">
-                    <span>City</span>
-                    <strong>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</strong>
-                  </div>
-                  <div className="weather-stat-tile">
-                    <span>Temperature</span>
+                <div className="weather-hero">
+                  <span className="weather-home-label">Current location</span>
+                  <h3>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</h3>
+                  <div className="weather-hero-row">
                     <strong>{weatherInfo ? `${Math.round(weatherInfo.temperature_2m)}${String.fromCharCode(176)}C` : '--'}</strong>
+                    <span>
+                      Feels Like: {weatherInfo ? `${Math.round(weatherInfo.apparent_temperature)}${String.fromCharCode(176)}C` : '--'}
+                    </span>
                   </div>
-                  <div className="weather-stat-tile">
-                    <span>Condition</span>
-                    <strong>{weatherInfo ? getWeatherConditionLabel(weatherInfo.weather_code) : '--'}</strong>
-                  </div>
-                  <div className="weather-stat-tile">
-                    <span>Wind</span>
-                    <strong>{weatherInfo ? `${Math.round(weatherInfo.wind_speed_10m)} km/h` : '--'}</strong>
+                  <p>
+                    {weatherInfo ? getWeatherConditionLabel(weatherInfo.weather_code) : '--'} | Wind {weatherInfo ? `${Math.round(weatherInfo.wind_speed_10m)} km/h` : '--'}
+                  </p>
+                </div>
+
+                <div className="weather-hourly-card">
+                  <div className="weather-section-title">Hourly Forecast</div>
+                  <div className="weather-hourly-strip">
+                    {weatherHourly.map((hour, index) => (
+                      <article key={hour.time} className="hourly-weather-item">
+                        <strong>
+                          {index === 0
+                            ? 'Now'
+                            : new Date(hour.time).toLocaleTimeString([], { hour: 'numeric' })}
+                        </strong>
+                        <span>{hour.condition}</span>
+                        <b>{Math.round(hour.temperature)}{String.fromCharCode(176)}C</b>
+                      </article>
+                    ))}
+                    {!weatherHourly.length && (
+                      <div className="empty-state small-empty">Hourly weather will appear here shortly.</div>
+                    )}
                   </div>
                 </div>
               </section>
@@ -4294,11 +4323,18 @@ function App() {
                 <div className="forecast-grid">
                   {weatherForecast.map((day) => (
                     <article key={day.date} className="forecast-card">
-                      <strong>{new Date(day.date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
+                      <strong>
+                        {weatherForecast[0]?.date === day.date
+                          ? 'Today'
+                          : new Date(day.date).toLocaleDateString([], { weekday: 'short' })}
+                      </strong>
                       <span>{day.condition}</span>
-                      <span>High {Math.round(day.high)}{String.fromCharCode(176)}C</span>
-                      <span>Low {Math.round(day.low)}{String.fromCharCode(176)}C</span>
-                      <span>Wind {Math.round(day.wind)} km/h</span>
+                      <span className="forecast-low">{Math.round(day.low)}{String.fromCharCode(176)}C</span>
+                      <span className="forecast-range">
+                        <i />
+                      </span>
+                      <span className="forecast-high">{Math.round(day.high)}{String.fromCharCode(176)}C</span>
+                      {!!day.precipitation && <span className="forecast-rain">{day.precipitation}%</span>}
                     </article>
                   ))}
                   {!weatherForecast.length && (
