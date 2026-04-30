@@ -21,6 +21,7 @@ const DEFAULT_ADMIN_ACCOUNT = {
   username: 'umesh',
   password: 'umesh123',
 };
+const DEFAULT_WEATHER_CITY = 'Brampton';
 
 const starterMoves = [];
 
@@ -87,6 +88,81 @@ function normalizeEmail(value) {
 
 function generatePassword() {
   return Math.random().toString(36).slice(-10).toUpperCase();
+}
+
+function getWeatherConditionLabel(code) {
+  const codeMap = {
+    0: 'Clear',
+    1: 'Mostly clear',
+    2: 'Partly cloudy',
+    3: 'Cloudy',
+    45: 'Fog',
+    48: 'Freezing fog',
+    51: 'Light drizzle',
+    53: 'Drizzle',
+    55: 'Heavy drizzle',
+    56: 'Freezing drizzle',
+    57: 'Heavy freezing drizzle',
+    61: 'Light rain',
+    63: 'Rain',
+    65: 'Heavy rain',
+    66: 'Freezing rain',
+    67: 'Heavy freezing rain',
+    71: 'Light snow',
+    73: 'Snow',
+    75: 'Heavy snow',
+    77: 'Snow grains',
+    80: 'Rain showers',
+    81: 'Heavy rain showers',
+    82: 'Violent rain showers',
+    85: 'Snow showers',
+    86: 'Heavy snow showers',
+    95: 'Thunderstorm',
+    96: 'Thunderstorm hail',
+    99: 'Severe hail storm',
+  };
+  return codeMap[code] || 'Weather update';
+}
+
+function extractMoveWeatherCity(move) {
+  const candidates = [move?.destination, move?.origin];
+  for (const candidate of candidates) {
+    const cleaned = String(candidate || '')
+      .replace(/WHATSAPP IMAGE/gi, '')
+      .replace(/[0-9]/g, ' ')
+      .replace(/\b(CANADA|LTD|LIMITED|OWNER|CPRS|TASK|LOAD|CHASSIS|TYPE|LOT|IMS|XAT|AVENUE|ROAD|RD|STREET|ST|DRIVE|DR|HIGHWAY|HWY)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned || cleaned === '-') {
+      continue;
+    }
+    const words = cleaned.split(' ').filter(Boolean);
+    for (let index = words.length; index >= 1; index -= 1) {
+      const city = words.slice(0, index).join(' ').trim();
+      if (city.length >= 3) {
+        return toUpperWords(city);
+      }
+    }
+  }
+  return '';
+}
+
+async function getCityFromCoordinates(latitude, longitude) {
+  try {
+    const response = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+    );
+    const result = await response.json();
+    return (
+      result.city ||
+      result.locality ||
+      result.principalSubdivision ||
+      result.countryName ||
+      ''
+    );
+  } catch {
+    return '';
+  }
 }
 
 async function sendDriverRegistrationEmail(payload) {
@@ -1028,7 +1104,7 @@ function App() {
   const [waitRecords, setWaitRecords] = useState(
     (savedState?.waitRecords || []).filter((record) => (record.screenshots?.length || 0) > 0)
   );
-  const [activeTab, setActiveTab] = useState('capture');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [search, setSearch] = useState('');
   const [waitSearch, setWaitSearch] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
@@ -1121,7 +1197,9 @@ function App() {
   const [fuelNotice, setFuelNotice] = useState('Add fuel receipts or manual fuel entries for daily tracking.');
   const [expenseNotice, setExpenseNotice] = useState('Add truck receipts or manual expenses for yearly totals.');
   const [weatherInfo, setWeatherInfo] = useState(null);
-  const [weatherNotice, setWeatherNotice] = useState('Weather is ready when location is allowed.');
+  const [weatherForecast, setWeatherForecast] = useState([]);
+  const [weatherLocationLabel, setWeatherLocationLabel] = useState('');
+  const [weatherNotice, setWeatherNotice] = useState('Weather is loading for the dashboard.');
   const [selectedCompanyFileIds, setSelectedCompanyFileIds] = useState([]);
   const [openCompanyMenuId, setOpenCompanyMenuId] = useState('');
   const [renameCompanyFileId, setRenameCompanyFileId] = useState('');
@@ -1153,30 +1231,6 @@ function App() {
       setClock(new Date().toLocaleString());
     }, 1000);
     return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!navigator.geolocation) {
-      setWeatherNotice('Weather needs browser location support.');
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const response = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,precipitation,wind_speed_10m`
-          );
-          const result = await response.json();
-          setWeatherInfo(result.current || null);
-          setWeatherNotice('Live weather updated.');
-        } catch {
-          setWeatherNotice('Live weather could not load right now.');
-        }
-      },
-      () => setWeatherNotice('Allow location to show live weather.')
-    );
   }, []);
 
   useEffect(() => {
@@ -2530,6 +2584,141 @@ function App() {
     [moves, selectedDriver]
   );
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchWeather = async () => {
+      const targetMove = [...selectedDriverMoves].reverse().find(Boolean) || null;
+      const targetCity = extractMoveWeatherCity(targetMove);
+
+      const loadForecast = async (latitude, longitude, label) => {
+        const response = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,wind_speed_10m,time&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max&forecast_days=7&timezone=auto`
+        );
+        const result = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        const daily = result.daily || {};
+        const forecast = (daily.time || []).map((day, index) => ({
+          date: day,
+          condition: getWeatherConditionLabel((daily.weather_code || [])[index]),
+          high: (daily.temperature_2m_max || [])[index],
+          low: (daily.temperature_2m_min || [])[index],
+          wind: (daily.wind_speed_10m_max || [])[index],
+        }));
+
+        setWeatherInfo(result.current || null);
+        setWeatherForecast(forecast);
+        setWeatherLocationLabel(label);
+        setWeatherNotice('7-day weather updated.');
+      };
+
+      try {
+        if (isAdminUser && portalFace === 'admin' && targetCity) {
+          setWeatherNotice(`Loading ${selectedDriver} weather for ${targetCity}...`);
+          const geocode = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
+          );
+          const geocodeResult = await geocode.json();
+          const location = geocodeResult?.results?.[0];
+          if (location) {
+            await loadForecast(location.latitude, location.longitude, targetCity);
+            return;
+          }
+        }
+
+        if (navigator.geolocation) {
+          setWeatherNotice('Loading current-location weather...');
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+              if (cancelled) {
+                return;
+              }
+              const { latitude, longitude } = position.coords;
+              const currentCity = await getCityFromCoordinates(latitude, longitude);
+              await loadForecast(latitude, longitude, currentCity || DEFAULT_WEATHER_CITY);
+            },
+            async () => {
+              if (targetCity) {
+                try {
+                  const geocode = await fetch(
+                    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
+                  );
+                  const geocodeResult = await geocode.json();
+                  const location = geocodeResult?.results?.[0];
+                  if (location) {
+                    await loadForecast(location.latitude, location.longitude, targetCity);
+                    return;
+                  }
+                } catch {
+                  // fall through to notice below
+                }
+              }
+              if (!cancelled) {
+                const geocode = await fetch(
+                  `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(DEFAULT_WEATHER_CITY)}&count=1&language=en&format=json`
+                );
+                const geocodeResult = await geocode.json();
+                const location = geocodeResult?.results?.[0];
+                if (location) {
+                  await loadForecast(location.latitude, location.longitude, DEFAULT_WEATHER_CITY);
+                  return;
+                }
+                setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
+                setWeatherNotice('Weather location is using the default city.');
+              }
+            }
+          );
+          return;
+        }
+
+        if (targetCity) {
+          setWeatherNotice(`Loading ${targetCity} weather...`);
+          const geocode = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
+          );
+          const geocodeResult = await geocode.json();
+          const location = geocodeResult?.results?.[0];
+          if (location) {
+            await loadForecast(location.latitude, location.longitude, targetCity);
+            return;
+          }
+        }
+
+        if (!cancelled) {
+          const geocode = await fetch(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(DEFAULT_WEATHER_CITY)}&count=1&language=en&format=json`
+          );
+          const geocodeResult = await geocode.json();
+          const location = geocodeResult?.results?.[0];
+          if (location) {
+            await loadForecast(location.latitude, location.longitude, DEFAULT_WEATHER_CITY);
+            return;
+          }
+          setWeatherInfo(null);
+          setWeatherForecast([]);
+          setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
+          setWeatherNotice('Weather location is using the default city.');
+        }
+      } catch {
+        if (!cancelled) {
+          setWeatherInfo(null);
+          setWeatherForecast([]);
+          setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
+          setWeatherNotice('Weather could not load right now.');
+        }
+      }
+    };
+
+    fetchWeather();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.name, isAdminUser, portalFace, selectedDriver, selectedDriverMoves]);
+
   const selectedDriverWaitRecords = useMemo(
     () =>
       waitRecords
@@ -3804,6 +3993,15 @@ function App() {
                 {movesMenuOpen && (
                   <div className="sidebar-submenu">
                     <button
+                      className={activeTab === 'dashboard' ? 'tab active' : 'tab'}
+                      onClick={() => {
+                        setActiveTab('dashboard');
+                        setMobileMenuOpen(false);
+                      }}
+                    >
+                      Dashboard
+                    </button>
+                    <button
                       className={activeTab === 'capture' ? 'tab active' : 'tab'}
                       onClick={() => {
                         setActiveTab('capture');
@@ -3935,6 +4133,15 @@ function App() {
                   </div>
                 )}
                 <button
+                  className={activeTab === 'dashboard' ? 'tab active' : 'tab'}
+                  onClick={() => {
+                    setActiveTab('dashboard');
+                    setMobileMenuOpen(false);
+                  }}
+                >
+                  Dashboard
+                </button>
+                <button
                   className={activeTab === 'capture' ? 'tab active' : 'tab'}
                   onClick={() => {
                     setActiveTab('capture');
@@ -4037,6 +4244,71 @@ function App() {
             </div>
           </div>
         </header>
+
+        {activeTab === 'dashboard' && (
+          <section className="panel">
+            <div className="panel-header split">
+              <div>
+                <h2>Dashboard</h2>
+                <p>
+                  Today's weather and forecast for {weatherLocationLabel || DEFAULT_WEATHER_CITY}.
+                </p>
+              </div>
+              <div className="capture-summary">
+                <span>City</span>
+                <strong>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</strong>
+                <span>{weatherNotice}</span>
+              </div>
+            </div>
+
+            <div className="match-grid weather-dashboard-grid">
+              <section className="match-card dashboard-weather-card">
+                <div className="match-card-head">
+                  <h3>Today</h3>
+                </div>
+                <div className="weather-now-grid">
+                  <div className="weather-stat-tile">
+                    <span>City</span>
+                    <strong>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</strong>
+                  </div>
+                  <div className="weather-stat-tile">
+                    <span>Temperature</span>
+                    <strong>{weatherInfo ? `${Math.round(weatherInfo.temperature_2m)}${String.fromCharCode(176)}C` : '--'}</strong>
+                  </div>
+                  <div className="weather-stat-tile">
+                    <span>Condition</span>
+                    <strong>{weatherInfo ? getWeatherConditionLabel(weatherInfo.weather_code) : '--'}</strong>
+                  </div>
+                  <div className="weather-stat-tile">
+                    <span>Wind</span>
+                    <strong>{weatherInfo ? `${Math.round(weatherInfo.wind_speed_10m)} km/h` : '--'}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section className="match-card dashboard-forecast-card">
+                <div className="match-card-head">
+                  <h3>Forecast</h3>
+                  <span className="empty-pill">{weatherForecast.length} days</span>
+                </div>
+                <div className="forecast-grid">
+                  {weatherForecast.map((day) => (
+                    <article key={day.date} className="forecast-card">
+                      <strong>{new Date(day.date).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</strong>
+                      <span>{day.condition}</span>
+                      <span>High {Math.round(day.high)}{String.fromCharCode(176)}C</span>
+                      <span>Low {Math.round(day.low)}{String.fromCharCode(176)}C</span>
+                      <span>Wind {Math.round(day.wind)} km/h</span>
+                    </article>
+                  ))}
+                  {!weatherForecast.length && (
+                    <div className="empty-state small-empty">Weather forecast will appear here when location or move city is ready.</div>
+                  )}
+                </div>
+              </section>
+            </div>
+          </section>
+        )}
 
         {activeTab === 'capture' && (
           <section className="panel">
@@ -4980,16 +5252,14 @@ function App() {
               <div>
                 <h2>Fuel</h2>
                 <p>
-                  Track live weather, daily miles, fuel receipts, and two-week paycheck
+                  Track daily miles, fuel receipts, and two-week paycheck
                   comparisons for {selectedDriver}.
                 </p>
               </div>
               <div className="capture-summary">
-                <span>Live weather</span>
-                <strong>
-                  {weatherInfo ? `${Math.round(weatherInfo.temperature_2m)}°C` : 'Waiting'}
-                </strong>
-                <span>{weatherInfo ? `Wind ${Math.round(weatherInfo.wind_speed_10m)} km/h` : weatherNotice}</span>
+                <span>Fuel entries</span>
+                <strong>{selectedFuelRecords.length}</strong>
+                <span>Daily miles and paycheck comparison</span>
               </div>
             </div>
 
@@ -5817,3 +6087,4 @@ function App() {
 }
 
 export default App;
+
