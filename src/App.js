@@ -124,6 +124,32 @@ function getWeatherConditionLabel(code) {
   return codeMap[code] || 'Weather update';
 }
 
+function getWeatherConditionClass(code) {
+  if ([0, 1].includes(code)) {
+    return 'clear';
+  }
+  if ([2, 3].includes(code)) {
+    return 'cloud';
+  }
+  if ([45, 48].includes(code)) {
+    return 'fog';
+  }
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) {
+    return 'rain';
+  }
+  if ([71, 73, 75, 77, 85, 86].includes(code)) {
+    return 'snow';
+  }
+  if ([95, 96, 99].includes(code)) {
+    return 'storm';
+  }
+  return 'cloud';
+}
+
+function formatWeatherTemp(value) {
+  return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}${String.fromCharCode(176)}C` : '--';
+}
+
 function extractMoveWeatherCity(move) {
   const candidates = [move?.destination, move?.origin];
   for (const candidate of candidates) {
@@ -2596,6 +2622,9 @@ function App() {
         const response = await fetch(
           `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,time&hourly=temperature_2m,weather_code,time&daily=weather_code,temperature_2m_max,temperature_2m_min,wind_speed_10m_max,precipitation_probability_max&forecast_days=7&timezone=auto`
         );
+        if (!response.ok) {
+          throw new Error('Weather service did not respond.');
+        }
         const result = await response.json();
         if (cancelled) {
           return;
@@ -2608,7 +2637,9 @@ function App() {
             time: hour,
             sortValue: new Date(hour).getTime(),
             temperature: (hourly.temperature_2m || [])[index],
+            code: (hourly.weather_code || [])[index],
             condition: getWeatherConditionLabel((hourly.weather_code || [])[index]),
+            conditionClass: getWeatherConditionClass((hourly.weather_code || [])[index]),
           }))
           .filter((hour) => Number.isFinite(hour.sortValue) && hour.sortValue >= currentTime - 30 * 60 * 1000)
           .slice(0, 8);
@@ -2616,7 +2647,9 @@ function App() {
         const daily = result.daily || {};
         const forecast = (daily.time || []).map((day, index) => ({
           date: day,
+          code: (daily.weather_code || [])[index],
           condition: getWeatherConditionLabel((daily.weather_code || [])[index]),
+          conditionClass: getWeatherConditionClass((daily.weather_code || [])[index]),
           high: (daily.temperature_2m_max || [])[index],
           low: (daily.temperature_2m_min || [])[index],
           wind: (daily.wind_speed_10m_max || [])[index],
@@ -2627,25 +2660,35 @@ function App() {
         setWeatherHourly(nextHours);
         setWeatherForecast(forecast);
         setWeatherLocationLabel(label);
-        setWeatherNotice('7-day weather updated.');
+        setWeatherNotice('Live weather updated.');
+      };
+
+      const loadWeatherForCity = async (city) => {
+        const safeCity = city || DEFAULT_WEATHER_CITY;
+        setWeatherNotice(`Loading weather for ${safeCity}...`);
+        const geocode = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(safeCity)}&count=1&language=en&format=json`
+        );
+        if (!geocode.ok) {
+          throw new Error('Weather location service did not respond.');
+        }
+        const geocodeResult = await geocode.json();
+        const location = geocodeResult?.results?.[0];
+        if (!location) {
+          throw new Error('Weather city was not found.');
+        }
+        await loadForecast(location.latitude, location.longitude, safeCity);
       };
 
       try {
-        if (isAdminUser && portalFace === 'admin' && targetCity) {
-          setWeatherNotice(`Loading ${selectedDriver} weather for ${targetCity}...`);
-          const geocode = await fetch(
-            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
-          );
-          const geocodeResult = await geocode.json();
-          const location = geocodeResult?.results?.[0];
-          if (location) {
-            await loadForecast(location.latitude, location.longitude, targetCity);
-            return;
-          }
-        }
+        const fallbackCity = targetCity || DEFAULT_WEATHER_CITY;
+        await loadWeatherForCity(fallbackCity);
 
         if (navigator.geolocation) {
-          setWeatherNotice('Loading current-location weather...');
+          if (isAdminUser && portalFace === 'admin' && targetCity) {
+            return;
+          }
+
           navigator.geolocation.getCurrentPosition(
             async (position) => {
               if (cancelled) {
@@ -2655,76 +2698,24 @@ function App() {
               const currentCity = await getCityFromCoordinates(latitude, longitude);
               await loadForecast(latitude, longitude, currentCity || DEFAULT_WEATHER_CITY);
             },
-            async () => {
-              if (targetCity) {
-                try {
-                  const geocode = await fetch(
-                    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
-                  );
-                  const geocodeResult = await geocode.json();
-                  const location = geocodeResult?.results?.[0];
-                  if (location) {
-                    await loadForecast(location.latitude, location.longitude, targetCity);
-                    return;
-                  }
-                } catch {
-                  // fall through to notice below
-                }
-              }
+            () => {
               if (!cancelled) {
-                const geocode = await fetch(
-                  `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(DEFAULT_WEATHER_CITY)}&count=1&language=en&format=json`
-                );
-                const geocodeResult = await geocode.json();
-                const location = geocodeResult?.results?.[0];
-                if (location) {
-                  await loadForecast(location.latitude, location.longitude, DEFAULT_WEATHER_CITY);
-                  return;
-                }
-                setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
-                setWeatherNotice('Weather location is using the default city.');
+                setWeatherNotice(`Live weather updated for ${fallbackCity}.`);
               }
             }
           );
-          return;
-        }
-
-        if (targetCity) {
-          setWeatherNotice(`Loading ${targetCity} weather...`);
-          const geocode = await fetch(
-            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`
-          );
-          const geocodeResult = await geocode.json();
-          const location = geocodeResult?.results?.[0];
-          if (location) {
-            await loadForecast(location.latitude, location.longitude, targetCity);
-            return;
-          }
-        }
-
-        if (!cancelled) {
-          const geocode = await fetch(
-            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(DEFAULT_WEATHER_CITY)}&count=1&language=en&format=json`
-          );
-          const geocodeResult = await geocode.json();
-          const location = geocodeResult?.results?.[0];
-          if (location) {
-            await loadForecast(location.latitude, location.longitude, DEFAULT_WEATHER_CITY);
-            return;
-          }
-          setWeatherInfo(null);
-          setWeatherHourly([]);
-          setWeatherForecast([]);
-          setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
-          setWeatherNotice('Weather location is using the default city.');
         }
       } catch {
         if (!cancelled) {
-          setWeatherInfo(null);
-          setWeatherHourly([]);
-          setWeatherForecast([]);
-          setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
-          setWeatherNotice('Weather could not load right now.');
+          try {
+            await loadWeatherForCity(DEFAULT_WEATHER_CITY);
+          } catch {
+            setWeatherInfo(null);
+            setWeatherHourly([]);
+            setWeatherForecast([]);
+            setWeatherLocationLabel(DEFAULT_WEATHER_CITY);
+            setWeatherNotice('Weather could not load right now.');
+          }
         }
       }
     };
@@ -4268,11 +4259,12 @@ function App() {
               <div>
                 <h2>Dashboard</h2>
                 <p>
-                  Today's weather and forecast for {weatherLocationLabel || DEFAULT_WEATHER_CITY}.
+                  Current weather, hourly forecast, and next 7 days for{' '}
+                  {weatherLocationLabel || DEFAULT_WEATHER_CITY}.
                 </p>
               </div>
               <div className="capture-summary">
-                <span>City</span>
+                <span>Weather City</span>
                 <strong>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</strong>
                 <span>{weatherNotice}</span>
               </div>
@@ -4280,32 +4272,35 @@ function App() {
 
             <div className="match-grid weather-dashboard-grid">
               <section className="match-card dashboard-weather-card">
-                <div className="weather-hero">
-                  <span className="weather-home-label">Current location</span>
+                <div className={`weather-hero weather-${getWeatherConditionClass(weatherInfo?.weather_code)}`}>
+                  <span className="weather-home-label">Current Weather</span>
                   <h3>{weatherLocationLabel || DEFAULT_WEATHER_CITY}</h3>
                   <div className="weather-hero-row">
-                    <strong>{weatherInfo ? `${Math.round(weatherInfo.temperature_2m)}${String.fromCharCode(176)}C` : '--'}</strong>
+                    <strong>{formatWeatherTemp(weatherInfo?.temperature_2m)}</strong>
                     <span>
-                      Feels Like: {weatherInfo ? `${Math.round(weatherInfo.apparent_temperature)}${String.fromCharCode(176)}C` : '--'}
+                      Feels Like: {formatWeatherTemp(weatherInfo?.apparent_temperature)}
                     </span>
                   </div>
-                  <p>
-                    {weatherInfo ? getWeatherConditionLabel(weatherInfo.weather_code) : '--'} | Wind {weatherInfo ? `${Math.round(weatherInfo.wind_speed_10m)} km/h` : '--'}
-                  </p>
+                  <div className="weather-current-details">
+                    <span className="weather-condition-pill">
+                      {weatherInfo ? getWeatherConditionLabel(weatherInfo.weather_code) : '--'}
+                    </span>
+                    <span>Wind {weatherInfo ? `${Math.round(weatherInfo.wind_speed_10m)} km/h` : '--'}</span>
+                  </div>
                 </div>
 
                 <div className="weather-hourly-card">
                   <div className="weather-section-title">Hourly Forecast</div>
                   <div className="weather-hourly-strip">
                     {weatherHourly.map((hour, index) => (
-                      <article key={hour.time} className="hourly-weather-item">
+                      <article key={hour.time} className={`hourly-weather-item weather-mini-${hour.conditionClass}`}>
                         <strong>
                           {index === 0
                             ? 'Now'
                             : new Date(hour.time).toLocaleTimeString([], { hour: 'numeric' })}
                         </strong>
                         <span>{hour.condition}</span>
-                        <b>{Math.round(hour.temperature)}{String.fromCharCode(176)}C</b>
+                        <b>{formatWeatherTemp(hour.temperature)}</b>
                       </article>
                     ))}
                     {!weatherHourly.length && (
@@ -4317,24 +4312,27 @@ function App() {
 
               <section className="match-card dashboard-forecast-card">
                 <div className="match-card-head">
-                  <h3>Forecast</h3>
+                  <h3>Next 7 Days Forecast</h3>
                   <span className="empty-pill">{weatherForecast.length} days</span>
                 </div>
                 <div className="forecast-grid">
                   {weatherForecast.map((day) => (
-                    <article key={day.date} className="forecast-card">
+                    <article key={day.date} className={`forecast-card weather-mini-${day.conditionClass}`}>
                       <strong>
                         {weatherForecast[0]?.date === day.date
                           ? 'Today'
                           : new Date(day.date).toLocaleDateString([], { weekday: 'short' })}
                       </strong>
-                      <span>{day.condition}</span>
-                      <span className="forecast-low">{Math.round(day.low)}{String.fromCharCode(176)}C</span>
+                      <span className="forecast-condition">{day.condition}</span>
+                      <span className="forecast-low">{formatWeatherTemp(day.low)}</span>
                       <span className="forecast-range">
                         <i />
                       </span>
-                      <span className="forecast-high">{Math.round(day.high)}{String.fromCharCode(176)}C</span>
-                      {!!day.precipitation && <span className="forecast-rain">{day.precipitation}%</span>}
+                      <span className="forecast-high">{formatWeatherTemp(day.high)}</span>
+                      <span className="forecast-meta">
+                        Rain {Number.isFinite(Number(day.precipitation)) ? `${day.precipitation}%` : '--'}
+                      </span>
+                      <span className="forecast-meta">Wind {Number.isFinite(Number(day.wind)) ? `${Math.round(day.wind)} km/h` : '--'}</span>
                     </article>
                   ))}
                   {!weatherForecast.length && (
