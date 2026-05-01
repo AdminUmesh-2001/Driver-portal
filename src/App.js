@@ -4312,7 +4312,7 @@ function App() {
 
               <section className="match-card dashboard-forecast-card">
                 <div className="match-card-head">
-                  <h3>Next 7 Days Forecast</h3>
+                  <h3>Forecast</h3>
                   <span className="empty-pill">{weatherForecast.length} days</span>
                 </div>
                 <div className="forecast-grid">
