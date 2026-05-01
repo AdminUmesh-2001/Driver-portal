@@ -3924,7 +3924,7 @@ function App() {
     }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isAdminUser && portalFace === 'admin' ? 'admin-shell' : 'driver-shell'}`}>
       <div className="app-layout">
         <aside className={mobileMenuOpen ? 'sidebar-card mobile-open' : 'sidebar-card'} ref={sidebarRef}>
           {isAdminUser && portalFace === 'admin' ? (

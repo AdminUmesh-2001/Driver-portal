@@ -1,5 +1,26 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
 .app-shell {
   min-height: 100vh;
+  max-width: 100vw;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 30%),
     radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.14), transparent 28%),
@@ -57,6 +78,7 @@
 
 .app-wrap {
   min-width: 0;
+  width: 100%;
 }
 
 .app-layout {
@@ -67,6 +89,7 @@
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 22px;
   align-items: start;
+  min-width: 0;
 }
 
 .sidebar-card,
@@ -1009,15 +1032,18 @@
 .saved-file-main {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .saved-file-main strong {
   font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
 .saved-file-main span {
   font-size: 13px;
   color: #64748b;
+  overflow-wrap: anywhere;
 }
 
 .file-menu-wrap {
@@ -1488,6 +1514,116 @@ td select {
   border-radius: 22px;
 }
 
+@media (max-width: 900px) {
+  .driver-shell .app-layout {
+    display: block;
+    padding: 12px;
+  }
+
+  .driver-shell .app-wrap,
+  .driver-shell .panel,
+  .driver-shell .match-card,
+  .driver-shell .match-results,
+  .driver-shell .upload-card,
+  .driver-shell .action-bar,
+  .driver-shell .saved-file-item,
+  .driver-shell .stat-card,
+  .driver-shell .capture-summary {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .driver-shell .fixed-hero-card {
+    top: 0;
+    z-index: 24;
+    margin-bottom: 12px;
+  }
+
+  .driver-shell .hero-card {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 22px;
+  }
+
+  .driver-shell .hero-top-row {
+    align-items: center;
+  }
+
+  .driver-shell .menu-toggle {
+    display: inline-flex;
+    flex: 0 0 48px;
+  }
+
+  .driver-shell .hero-card h1 {
+    font-size: clamp(30px, 9vw, 42px);
+    line-height: 1;
+  }
+
+  .driver-shell .sidebar-stack,
+  .driver-shell .capture-summary,
+  .driver-shell .toolbar input,
+  .driver-shell .action-bar input,
+  .driver-shell .save-file-bar input,
+  .driver-shell .primary-btn,
+  .driver-shell .secondary-btn {
+    width: 100%;
+  }
+
+  .driver-shell .panel {
+    padding: 16px;
+    border-radius: 24px;
+    overflow: visible;
+  }
+
+  .driver-shell .panel-header.split {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .driver-shell .match-grid,
+  .driver-shell .weather-dashboard-grid,
+  .driver-shell .finance-grid,
+  .driver-shell .results-grid,
+  .driver-shell .form-grid,
+  .driver-shell .shot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .driver-shell .upload-card,
+  .driver-shell .action-bar,
+  .driver-shell .save-file-bar,
+  .driver-shell .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .driver-shell .weather-hero {
+    min-height: 240px;
+    padding: 24px 16px;
+  }
+
+  .driver-shell .weather-hourly-strip {
+    grid-auto-columns: minmax(108px, 38vw);
+  }
+
+  .driver-shell .table-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .driver-shell table {
+    min-width: 860px;
+  }
+
+  .driver-shell .saved-file-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+}
+
 @media (max-width: 1100px) {
   .app-layout,
   .hero-card,
@@ -1609,10 +1745,27 @@ td select {
   }
 
   .forecast-card {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(58px, 0.7fr) minmax(0, 1fr) auto;
+  }
+
+  .forecast-condition {
+    grid-column: 2 / 4;
+  }
+
+  .forecast-low {
+    grid-column: 1;
   }
 
   .forecast-range {
+    grid-column: 2;
+  }
+
+  .forecast-high {
+    grid-column: 3;
+  }
+
+  .forecast-rain,
+  .forecast-meta {
     grid-column: 1 / -1;
   }
 
