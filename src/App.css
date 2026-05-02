@@ -120,9 +120,10 @@ textarea {
 }
 
 .options-modal {
-  width: min(100%, 860px);
+  width: min(100%, 980px);
   display: grid;
   gap: 16px;
+  align-content: start;
 }
 
 .driver-list-modal {
@@ -628,11 +629,26 @@ textarea {
 
 .data-card-list {
   margin-top: 4px;
+  min-width: 0;
 }
 
 .driver-data-card > strong {
   font-size: 18px;
   color: #0f172a;
+}
+
+.driver-data-card,
+.driver-data-card label,
+.options-section-card,
+.options-section-card label {
+  min-width: 0;
+}
+
+.driver-data-card input,
+.driver-data-card select,
+.options-section-card input,
+.options-section-card select {
+  width: 100%;
 }
 
 .data-grid {
@@ -1488,15 +1504,29 @@ td select {
   justify-content: center;
   padding: 24px;
   z-index: 20;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .modal-card {
   position: relative;
   width: min(100%, 980px);
-  max-height: 90vh;
+  max-height: calc(100dvh - 48px);
   background: #fff;
   border-radius: 28px;
   padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.modal-card.options-modal {
+  max-height: calc(100dvh - 40px);
+  padding-right: 22px;
+}
+
+.options-modal .panel-header {
+  padding-right: 96px;
 }
 
 .modal-close {
@@ -1689,6 +1719,27 @@ td select {
 
   .table-wrap {
     border-radius: 18px;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  .modal-card {
+    max-height: calc(100dvh - 20px);
+    border-radius: 22px;
+    padding: 14px;
+  }
+
+  .modal-card.options-modal {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    padding: 14px;
+  }
+
+  .options-modal .panel-header {
+    padding-right: 78px;
   }
 }
 
